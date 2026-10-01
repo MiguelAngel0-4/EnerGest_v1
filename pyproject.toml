@@ -1,0 +1,17 @@
+[project]
+name = "gestion-plantas-electricas"
+version = "0.1.0"
+description = "Software especializado para la gestión técnica, operativa y financiera de plantas eléctricas"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

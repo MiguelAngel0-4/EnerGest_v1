@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=8.0
+black>=24.0
+ruff>=0.5
+pyinstaller>=6.0
+pytest-html>=4.0

@@ -1,0 +1,26 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Datos locales y logs (nunca se suben al repositorio)
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+
+# Empaquetado
+dist/
+build/*
+!build/.gitkeep
+!build/*.spec
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
