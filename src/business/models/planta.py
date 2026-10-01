@@ -21,12 +21,11 @@ class TipoCombustible(StrEnum):
 
     DIESEL = "DIESEL"
     GASOLINA = "GASOLINA"
-    GAS = "GAS"
 
     @property
     def etiqueta(self) -> str:
         """Nombre legible para mostrar al usuario."""
-        return {"DIESEL": "Diésel", "GASOLINA": "Gasolina", "GAS": "Gas"}[self.value]
+        return {"DIESEL": "Diésel", "GASOLINA": "Gasolina"}[self.value]
 
 
 @dataclass(frozen=True, slots=True)

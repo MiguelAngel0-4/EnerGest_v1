@@ -170,3 +170,96 @@ QToolTip {
     border: none;
     padding: 4px;
 }
+
+/* =====================================================================
+   Formularios y diálogos (Entrega D)
+   ===================================================================== */
+QGroupBox {
+    background-color: #FFFFFF;
+    border: 1px solid #D5DCE3;
+    border-radius: 6px;
+    margin-top: 14px;
+    padding: 12px 10px 8px 10px;
+    font-weight: bold;
+    color: #1F3A5F;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+}
+QGroupBox QLabel, QGroupBox QCheckBox {
+    background-color: transparent;
+    font-weight: normal;
+    color: #1F2933;
+}
+QDialog QLabel {
+    background-color: transparent;
+}
+#envolturaCampo {
+    background-color: transparent;
+}
+QSpinBox, QDoubleSpinBox, QDateEdit, QPlainTextEdit {
+    background-color: #FFFFFF;
+    border: 1px solid #C4CDD5;
+    border-radius: 5px;
+    padding: 5px 8px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QPlainTextEdit:focus {
+    border: 1px solid #2E75B6;
+}
+QSpinBox:disabled, QDoubleSpinBox:disabled, QDateEdit:disabled {
+    color: #9AA5B1;
+    background-color: #F1F3F5;
+}
+
+/* Campo con error: lo activa el código con setProperty("error", True) */
+*[error="true"] {
+    border: 1px solid #C0392B;
+    background-color: #FDF2F1;
+}
+#errorCampo {
+    color: #C0392B;
+    font-size: 9pt;
+    font-weight: normal;
+    background-color: transparent;
+}
+#mensajeError {
+    color: #C0392B;
+    background-color: #FDF2F1;
+    border: 1px solid #F1C4BF;
+    border-radius: 5px;
+    padding: 8px;
+}
+#avisoInformativo {
+    color: #1F3A5F;
+    background-color: #EAF2FB;
+    border: 1px solid #C5DCF2;
+    border-radius: 5px;
+    padding: 8px;
+}
+#datoSistema {
+    color: #1F3A5F;
+    font-weight: bold;
+    background-color: transparent;
+}
+
+/* Pestañas del historial */
+QTabWidget::pane {
+    border: 1px solid #D5DCE3;
+    border-radius: 6px;
+    background-color: #FFFFFF;
+}
+QTabBar::tab {
+    background-color: #E9EEF4;
+    color: #1F3A5F;
+    padding: 8px 16px;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background-color: #2E75B6;
+    color: #FFFFFF;
+    font-weight: bold;
+}

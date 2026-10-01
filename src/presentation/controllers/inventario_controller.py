@@ -14,13 +14,20 @@ el lenguaje de la interfaz y el de los servicios.
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Final
+from datetime import date
+from typing import Any, Final
 
 from PySide6.QtCore import QModelIndex, QObject
+from PySide6.QtWidgets import QDialog
 
-from src.business.exceptions import NegocioError
+from src.business.exceptions import NegocioError, ValidacionError
 from src.business.models.estado_planta import EstadoPlanta
+from src.business.models.planta import Planta, TipoCombustible
 from src.business.services.planta_service import PlantaService
+from src.presentation.controllers.planta_form_mapper import datos_a_valores, valores_a_datos
+from src.presentation.dialogs.cambiar_estado_dialog import CambiarEstadoDialog, OpcionEstado
+from src.presentation.dialogs.historial_planta_dialog import HistorialPlantaDialog
+from src.presentation.dialogs.planta_form_dialog import PlantaFormDialog
 from src.presentation.table_models.plantas_table_model import (
     ID_ROLE,
     RANGOS_POTENCIA,
@@ -38,6 +45,21 @@ logger = logging.getLogger(__name__)
 _EN_OPERACION: Final[str] = "EN_OPERACION"
 _TODOS: Final[str] = "TODOS"
 
+_VOLTAJES_SUGERIDOS: Final[list[str]] = [
+    "120 V",
+    "120/240 V",
+    "208 V",
+    "220 V",
+    "220/440 V",
+    "440 V",
+]
+_OPCIONES_FASES: Final[list[tuple[str, int | None]]] = [
+    ("—", None),
+    ("Monofásica (1)", 1),
+    ("Trifásica (3)", 3),
+]
+_FORMATO_FECHA: Final[str] = "%d/%m/%Y"
+
 _ACCIONES: Final[list[tuple[str, str]]] = [
     ("editar", "Editar"),
     ("estado", "Estado"),
@@ -54,6 +76,8 @@ class InventarioController(QObject):
         super().__init__(parent)
         self._servicio = servicio
         self._vista = vista
+        # Planta devuelta por la última operación exitosa de un diálogo.
+        self._resultado: Planta | None = None
 
         # Cadena de datos: modelo (todas las cargadas) -> proxy (filtra/ordena) -> tabla.
         self._modelo = PlantasTableModel(self)
@@ -121,20 +145,108 @@ class InventarioController(QObject):
             self._actualizar_panel_numeros()
 
     def abrir_registro(self) -> None:
-        """Abre el formulario de registro (se implementa en la Entrega D)."""
-        self._funcion_pendiente("Registrar nueva planta")
+        """Formulario de registro: la planta recibe automáticamente el menor número libre."""
+        with self._capturar_errores("Registrar nueva planta"):
+            proximo = formatear_consecutivo(self._servicio.proximo_numero())
+            dialogo = self._crear_formulario(
+                "Registrar nueva planta",
+                f"Se asignará automáticamente: {proximo}",
+                f"{EstadoPlanta.DISPONIBLE.etiqueta} (automático)",
+            )
+            dialogo.guardar_solicitado.connect(
+                lambda valores: self._guardar(dialogo, valores, planta_id=None)
+            )
+            if self._ejecutar(dialogo) and self._resultado is not None:
+                planta = self._resultado
+                self.recargar()
+                self._vista.mostrar_info(
+                    "Planta registrada",
+                    f"{self._describir(planta)}\n\nQuedó registrada con el número "
+                    f"{formatear_consecutivo(planta.numero_consecutivo)}.",
+                )
 
     def editar(self, planta_id: int) -> None:
-        """Abre el formulario de edición (se implementa en la Entrega D)."""
-        self._funcion_pendiente(f"Editar planta id={planta_id}")
+        """Formulario de edición de datos técnicos (estado y número no se editan aquí)."""
+        with self._capturar_errores("Editar planta"):
+            planta = self._servicio.obtener(planta_id)
+            dialogo = self._crear_formulario(
+                f"Editar planta {formatear_consecutivo(planta.numero_consecutivo)}",
+                f"{formatear_consecutivo(planta.numero_consecutivo)} (no editable)",
+                f"{planta.estado.etiqueta} (se cambia con el botón Estado)",
+            )
+            dialogo.cargar_valores(datos_a_valores(planta.datos))
+            dialogo.guardar_solicitado.connect(
+                lambda valores: self._guardar(dialogo, valores, planta_id=planta_id)
+            )
+            if self._ejecutar(dialogo):
+                self.recargar()
 
     def cambiar_estado(self, planta_id: int) -> None:
-        """Abre el diálogo de cambio de estado (se implementa en la Entrega D)."""
-        self._funcion_pendiente(f"Cambiar estado de la planta id={planta_id}")
+        """Diálogo de cambio de estado con solo las transiciones válidas."""
+        with self._capturar_errores("Cambiar estado"):
+            planta = self._servicio.obtener(planta_id)
+            if planta.estado.es_final:
+                self._vista.mostrar_info(
+                    "Estado definitivo",
+                    f"La planta está en estado '{planta.estado.etiqueta}', que es definitivo.\n"
+                    "Su información se conserva para consulta e historial.",
+                )
+                return
+
+            cambios, _ = self._servicio.historial(planta_id)
+            fecha_minima = cambios[-1].fecha if cambios else planta.fecha_registro.date()
+            opciones = [
+                OpcionEstado(
+                    clave=destino.value,
+                    etiqueta=destino.etiqueta,
+                    requiere_motivo=destino.requiere_motivo,
+                    aviso=self._aviso_transicion(planta, destino),
+                )
+                for destino in EstadoPlanta  # Recorre en el orden del Enum
+                if planta.estado.puede_pasar_a(destino)
+            ]
+            dialogo = CambiarEstadoDialog(
+                self._describir(planta), planta.estado.etiqueta, opciones, fecha_minima, self._vista
+            )
+            dialogo.cambio_solicitado.connect(
+                lambda clave, motivo, fecha: self._aplicar_cambio_estado(
+                    dialogo, planta, clave, motivo, fecha
+                )
+            )
+            if self._ejecutar(dialogo) and self._resultado is not None:
+                actualizada = self._resultado
+                self.recargar()
+                self._vista.mostrar_info(
+                    "Estado actualizado", self._resumen_cambio(planta, actualizada)
+                )
 
     def ver_historial(self, planta_id: int) -> None:
-        """Abre el diálogo de historial (se implementa en la Entrega D)."""
-        self._funcion_pendiente(f"Historial de la planta id={planta_id}")
+        """Muestra la línea de tiempo de estados y de números consecutivos."""
+        with self._capturar_errores("Ver historial"):
+            planta = self._servicio.obtener(planta_id)
+            cambios, consecutivos = self._servicio.historial(planta_id)
+            filas_estados = [
+                (
+                    c.fecha.strftime(_FORMATO_FECHA),
+                    c.estado_anterior.etiqueta if c.estado_anterior else "— (registro)",
+                    c.estado_nuevo.etiqueta,
+                    c.motivo or "",
+                )
+                for c in cambios
+            ]
+            filas_consecutivos = [
+                (
+                    formatear_consecutivo(r.numero),
+                    r.fecha_asignacion.strftime(_FORMATO_FECHA),
+                    r.fecha_liberacion.strftime(_FORMATO_FECHA) if r.fecha_liberacion else "Vigente",
+                    r.motivo_liberacion or "",
+                )
+                for r in consecutivos
+            ]
+            dialogo = HistorialPlantaDialog(
+                self._describir(planta), filas_estados, filas_consecutivos, self._vista
+            )
+            self._ejecutar(dialogo)
 
     def consultar_numero(self, numero: int) -> None:
         """Muestra qué plantas han tenido un número consecutivo."""
@@ -166,6 +278,143 @@ class InventarioController(QObject):
     # ------------------------------------------------------------------ #
     # Métodos internos
     # ------------------------------------------------------------------ #
+
+    def _crear_formulario(
+        self, titulo: str, texto_consecutivo: str, texto_estado: str
+    ) -> PlantaFormDialog:
+        """Crea el formulario con las opciones de los combos."""
+        marcas = sorted(
+            {p.datos.marca for p in self._servicio.listar(incluir_fuera_de_operacion=True)},
+            key=str.casefold,
+        )
+        combustibles: list[tuple[str, str | None]] = [("—", None)]
+        combustibles += [(c.etiqueta, c.value) for c in TipoCombustible]
+        return PlantaFormDialog(
+            titulo,
+            texto_consecutivo,
+            texto_estado,
+            marcas,
+            _OPCIONES_FASES,
+            combustibles,
+            _VOLTAJES_SUGERIDOS,
+            self._vista,
+        )
+
+    def _guardar(
+        self, dialogo: PlantaFormDialog, valores: dict[str, Any], planta_id: int | None
+    ) -> None:
+        """Respuesta al botón Guardar: registra o actualiza, o marca los errores."""
+        try:
+            datos = valores_a_datos(valores)
+            if planta_id is None:
+                self._resultado = self._servicio.registrar(datos)
+            else:
+                self._resultado = self._servicio.actualizar_datos(planta_id, datos)
+        except ValidacionError as exc:
+            dialogo.marcar_errores(exc.errores)  # El diálogo sigue abierto para corregir
+            return
+        except NegocioError as exc:
+            dialogo.mostrar_error(str(exc))
+            return
+        except Exception:
+            logger.exception("Error inesperado al guardar la planta.")
+            dialogo.mostrar_error(
+                "Ocurrió un error inesperado. Los detalles quedaron registrados en el log."
+            )
+            return
+        dialogo.accept()
+
+    def _aplicar_cambio_estado(
+        self,
+        dialogo: CambiarEstadoDialog,
+        planta: Planta,
+        clave: str,
+        motivo: str,
+        fecha: date,
+    ) -> None:
+        """Respuesta al botón Actualizar estado."""
+        nuevo = EstadoPlanta(clave)
+        # Se revisa el motivo ANTES de confirmar: sería frustrante aceptar una acción
+        # "irreversible" y recibir después el error de que faltaba el motivo.
+        # La regla sigue viviendo en el negocio (EstadoPlanta.requiere_motivo).
+        if nuevo.requiere_motivo and not motivo.strip():
+            dialogo.mostrar_errores(
+                {"motivo": f"Debe indicar el motivo para pasar a '{nuevo.etiqueta}'."}
+            )
+            return
+        if nuevo.es_final and not dialogo.confirmar(
+            "Confirmar cambio definitivo",
+            f"¿Confirma que la planta {self._describir(planta)} pasa a '{nuevo.etiqueta}'?\n\n"
+            "Este estado es definitivo y no se puede revertir.",
+        ):
+            return
+        try:
+            self._resultado = self._servicio.cambiar_estado(planta.id, nuevo, motivo, fecha)
+        except ValidacionError as exc:
+            dialogo.mostrar_errores(exc.errores)
+            return
+        except NegocioError as exc:
+            dialogo.mostrar_error(str(exc))
+            return
+        except Exception:
+            logger.exception("Error inesperado al cambiar el estado.")
+            dialogo.mostrar_error(
+                "Ocurrió un error inesperado. Los detalles quedaron registrados en el log."
+            )
+            return
+        dialogo.accept()
+
+    def _ejecutar(self, dialogo: QDialog) -> bool:
+        """Abre un diálogo modal, lo libera de memoria al cerrarse e indica si se aceptó."""
+        self._resultado = None
+        aceptado = dialogo.exec() == QDialog.DialogCode.Accepted
+        dialogo.deleteLater()
+        return aceptado
+
+    @staticmethod
+    def _describir(planta: Planta) -> str:
+        """Ej. "PE-005 · Cummins C50D6"."""
+        numero = (
+            formatear_consecutivo(planta.numero_consecutivo)
+            if planta.numero_consecutivo is not None
+            else "Sin número"
+        )
+        nombre = " ".join(filter(None, [planta.datos.marca, planta.datos.modelo]))
+        return f"{numero} · {nombre}"
+
+    @staticmethod
+    def _aviso_transicion(planta: Planta, destino: EstadoPlanta) -> str:
+        """Explica al usuario las consecuencias del cambio antes de confirmarlo."""
+        avisos: list[str] = []
+        if planta.estado.en_operacion and not destino.en_operacion:
+            numero = formatear_consecutivo(planta.numero_consecutivo)
+            avisos.append(
+                f"La planta liberará el número {numero}, que quedará disponible "
+                "para la próxima planta registrada."
+            )
+        elif not planta.estado.en_operacion and destino.en_operacion:
+            avisos.append(
+                "La planta volverá a operar y recibirá un número consecutivo: "
+                "el que tenía antes, si sigue libre; si no, el menor disponible."
+            )
+        if destino.es_final:
+            avisos.append("Este estado es definitivo.")
+        return " ".join(avisos)
+
+    @staticmethod
+    def _resumen_cambio(antes: Planta, despues: Planta) -> str:
+        """Mensaje de confirmación tras un cambio de estado."""
+        texto = (
+            f"{InventarioController._describir(antes)}\n\n"
+            f"Pasó de '{antes.estado.etiqueta}' a '{despues.estado.etiqueta}'."
+        )
+        if antes.numero_consecutivo is not None and despues.numero_consecutivo is None:
+            texto += f"\nEl número {formatear_consecutivo(antes.numero_consecutivo)} quedó libre."
+        elif antes.numero_consecutivo is None and despues.numero_consecutivo is not None:
+            texto += (
+                f"\nRecibió el número {formatear_consecutivo(despues.numero_consecutivo)}."
+            )
+        return texto
 
     def _aplicar_filtros_locales(self) -> None:
         """Traduce las opciones de los combos a filtros del proxy."""
@@ -217,12 +466,6 @@ class InventarioController(QObject):
         planta_id = indice.data(ID_ROLE)
         if planta_id is not None:
             self.editar(int(planta_id))
-
-    def _funcion_pendiente(self, accion: str) -> None:
-        logger.info("Acción solicitada aún no disponible: %s", accion)
-        self._vista.mostrar_info(
-            "Próximamente", f"{accion}.\n\nEsta función se incorpora en la siguiente entrega."
-        )
 
     @contextmanager
     def _capturar_errores(self, accion: str) -> Iterator[None]:
