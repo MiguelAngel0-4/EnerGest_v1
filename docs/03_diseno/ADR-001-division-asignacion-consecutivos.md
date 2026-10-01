@@ -18,7 +18,7 @@ def asignar(self, uow: IUnidadDeTrabajo, planta_id: int, fecha: date) -> int
 
 Al implementarlo surgió un conflicto entre dos restricciones del esquema de base de datos, ambas necesarias:
 
-1. **CHECK de la tabla `plantas`:** una planta en estado de operación (DISPONIBLE, ALQUILADA, EN_MANTENIMIENTO) debe tener `numero_consecutivo` distinto de NULL. Por lo tanto, la planta debe _nacer_ con su número.
+1. **CHECK de la tabla `plantas`:** una planta en estado de operación (DISPONIBLE, ALQUILADA, EN*MANTENIMIENTO) debe tener `numero_consecutivo` distinto de NULL. Por lo tanto, la planta debe \_nacer* con su número.
 2. **Llave foránea de `historial_consecutivos`:** el registro del historial apunta a `plantas.id`, así que la planta debe _existir_ antes de registrar su número en el historial.
 
 Para la asignación inicial, el método `asignar` necesitaba el `planta_id`, que solo existe después de insertar la planta. Pero la planta no podía insertarse sin conocer antes su número. Un solo método no podía cumplir ambas condiciones.
