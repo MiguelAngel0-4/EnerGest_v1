@@ -31,6 +31,17 @@ class ConsecutivoService:
             candidato += 1
         return candidato
 
+    @staticmethod
+    def calcular_libres(en_uso: set[int]) -> list[int]:
+        """
+        Devuelve los "huecos" entre 1 y el mayor número en uso, en orden.
+
+        Ejemplos: {} -> [] | {1, 2, 3} -> [] | {1, 2, 4, 5, 7} -> [3, 6]
+        """
+        if not en_uso:
+            return []
+        return [n for n in range(1, max(en_uso)) if n not in en_uso]
+
     def proponer_para_nueva(self, uow: IUnidadDeTrabajo) -> int:
         """Número que debe recibir una planta recién registrada."""
         return self.calcular_menor_libre(uow.consecutivos.numeros_en_uso())

@@ -232,6 +232,16 @@ class PlantaService:
         with self._uow_factory() as uow:
             return uow.consecutivos.historial_de_numero(numero)
 
+    def numeros_libres(self) -> list[int]:
+        """Números liberados que la próxima planta podría reutilizar, en orden."""
+        with self._uow_factory() as uow:
+            return self._consecutivos.calcular_libres(uow.consecutivos.numeros_en_uso())
+
+    def proximo_numero(self) -> int:
+        """Número que recibirá la siguiente planta registrada (solo consulta)."""
+        with self._uow_factory() as uow:
+            return self._consecutivos.proponer_para_nueva(uow)
+
     # ------------------------------------------------------------------ #
     # Métodos internos
     # ------------------------------------------------------------------ #

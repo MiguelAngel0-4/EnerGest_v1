@@ -25,3 +25,20 @@ def formatear_moneda(valor: int | None) -> str:
         return SIN_VALOR
     signo = "-" if valor < 0 else ""
     return f"{signo}$ {abs(valor):,}".replace(",", ".")
+
+
+def formatear_decimal(valor: float | None, sufijo: str = "") -> str:
+    """125.5 -> "125,5" | 250.0 -> "250". Con sufijo: "250 kVA"."""
+    if valor is None:
+        return SIN_VALOR
+    texto = f"{valor:,.2f}".rstrip("0").rstrip(".")
+    # Formato colombiano: punto para miles, coma para decimales.
+    texto = texto.replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"{texto} {sufijo}".strip()
+
+
+def formatear_entero(valor: int | None, sufijo: str = "") -> str:
+    """1200 -> "1.200". Con sufijo: "1.200 h"."""
+    if valor is None:
+        return SIN_VALOR
+    return f"{valor:,} {sufijo}".replace(",", ".").strip()
