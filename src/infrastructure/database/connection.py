@@ -18,9 +18,11 @@ Uso típico desde un repositorio:
 """
 
 import logging
+import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from src.config import settings
@@ -96,59 +98,101 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def initialize_schema(self, schema_path: Path) -> None:
+    def initialize_schema(
+        self,
+        schema_path: Path,
+        migrations_dir: Path | None = None,
+        backup_dir: Path | None = None,
+    ) -> None:
         """
-        Crea las tablas si la base de datos es nueva.
+        Deja la base de datos en la versión que espera la aplicación.
 
-        Usa PRAGMA user_version como "número de versión" del esquema:
-        0 = base vacía; igual a SCHEMA_VERSION = al día; otro = requiere migración.
+        Funciona como la Constitución y sus enmiendas:
+        - schema.sql es el texto original (versión 1) y NUNCA se modifica.
+        - Cada archivo NNN_descripcion.sql de migrations/ es una enmienda que
+          lleva la base a la versión NNN. Se aplican en orden, una sola vez.
+        Una base nueva y una existente terminan exactamente iguales.
+
+        PRAGMA user_version guarda en qué versión está el archivo .db.
 
         Args:
-            schema_path: Ruta del archivo schema.sql.
+            schema_path: Ruta del schema.sql (versión 1).
+            migrations_dir: Carpeta de migraciones (por defecto, junto a schema.sql).
+            backup_dir: Dónde guardar el respaldo previo a migrar
+                        (por defecto, la subcarpeta "respaldos" junto al .db).
 
         Raises:
-            SchemaInitializationError: Si el script no existe o falla.
+            SchemaInitializationError: Si falta un archivo, la base es más nueva
+                que la aplicación o una migración falla (la base queda intacta).
         """
-        try:
-            script = schema_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.exception("No se encontró el archivo de esquema: %s", schema_path)
+        migrations_dir = migrations_dir or schema_path.parent / "migrations"
+        backup_dir = backup_dir or self._db_path.parent / "respaldos"
+        objetivo = settings.SCHEMA_VERSION
+        migraciones = self._listar_migraciones(migrations_dir)
+
+        # Protección contra un olvido frecuente: agregar una migración y no
+        # actualizar settings.SCHEMA_VERSION. Mejor fallar al iniciar con un
+        # mensaje claro que funcionar con un esquema incompleto.
+        if migraciones and max(migraciones) > objetivo:
             raise SchemaInitializationError(
-                f"No se pudo leer el esquema en {schema_path}"
-            ) from exc
+                f"Existe la migración {max(migraciones):03d}, pero settings.SCHEMA_VERSION "
+                f"es {objetivo}. Actualice SCHEMA_VERSION en src/config/settings.py."
+            )
 
-        conn = self._connect()
-        try:
-            current_version: int = conn.execute("PRAGMA user_version;").fetchone()[0]
+        actual = self._version_actual()
+        if actual > objetivo:
+            raise SchemaInitializationError(
+                f"La base de datos está en la versión {actual} y esta aplicación solo "
+                f"conoce hasta la {objetivo}. Use una versión más reciente del programa."
+            )
+        if actual == objetivo:
+            logger.info("Esquema al día (versión %s).", actual)
+            return
 
-            if current_version == settings.SCHEMA_VERSION:
-                logger.info("Esquema al día (versión %s).", current_version)
-                return
+        if actual == 0:
+            self._ejecutar_script(self._leer(schema_path), version_resultante=1)
+            logger.info("Esquema base creado (versión 1) en %s", self._db_path)
+            actual = 1
+        else:
+            # La base ya tiene información: se respalda ANTES de tocarla.
+            respaldo = self.backup(backup_dir, etiqueta=f"v{actual}")
+            logger.info("Respaldo previo a la migración guardado en %s", respaldo)
 
-            if current_version != 0:
-                # Aquí se enganchará el sistema de migraciones en el futuro.
+        for version in range(actual + 1, objetivo + 1):
+            if version not in migraciones:
                 raise SchemaInitializationError(
-                    f"La base de datos está en la versión {current_version} y la "
-                    f"aplicación espera la {settings.SCHEMA_VERSION}. Se requiere migración."
+                    f"No se encontró la migración {version:03d} en {migrations_dir}."
                 )
+            self._ejecutar_script(self._leer(migraciones[version]), version_resultante=version)
+            logger.info("Migración %s aplicada: %s", version, migraciones[version].name)
 
-            # Todo el script, incluida la versión, dentro de UNA transacción:
-            # o se crean todas las tablas, o ninguna.
-            conn.executescript(
-                "BEGIN IMMEDIATE;\n"
-                f"{script}\n"
-                f"PRAGMA user_version = {settings.SCHEMA_VERSION};\n"
-                "COMMIT;"
-            )
-            logger.info(
-                "Esquema creado (versión %s) en %s", settings.SCHEMA_VERSION, self._db_path
-            )
+    def backup(self, carpeta: Path, etiqueta: str = "manual") -> Path:
+        """
+        Copia completa y consistente de la base de datos.
+
+        Usa la API de respaldo nativa de SQLite, que copia de forma segura
+        aunque la base esté en uso (copiar el archivo a mano podría dejar
+        una copia corrupta si coincide con una escritura).
+
+        Returns:
+            Ruta del archivo de respaldo creado.
+        """
+        carpeta.mkdir(parents=True, exist_ok=True)
+        marca_tiempo = datetime.now().strftime("%Y%m%d_%H%M%S")
+        destino = carpeta / f"{self._db_path.stem}_{etiqueta}_{marca_tiempo}.db"
+        origen = self._connect()
+        try:
+            copia = sqlite3.connect(destino)
+            try:
+                origen.backup(copia)
+            finally:
+                copia.close()
         except sqlite3.Error as exc:
-            self._rollback_quietly(conn)
-            logger.exception("Falló la creación del esquema.")
-            raise SchemaInitializationError(f"No se pudo crear el esquema: {exc}") from exc
+            logger.exception("Falló el respaldo de la base de datos.")
+            raise DatabaseError(f"No se pudo crear el respaldo: {exc}") from exc
         finally:
-            conn.close()
+            origen.close()
+        return destino
 
     # ------------------------------------------------------------------ #
     # Métodos internos
@@ -180,6 +224,53 @@ class DatabaseManager:
             raise self._translate_error(exc) from exc
 
         return conn
+
+    def _version_actual(self) -> int:
+        conn = self._connect()
+        try:
+            return int(conn.execute("PRAGMA user_version;").fetchone()[0])
+        finally:
+            conn.close()
+
+    def _ejecutar_script(self, script: str, version_resultante: int) -> None:
+        """Ejecuta un script SQL y fija la versión, TODO en una sola transacción."""
+        conn = self._connect()
+        try:
+            conn.executescript(
+                "BEGIN IMMEDIATE;\n"
+                f"{script}\n"
+                f"PRAGMA user_version = {version_resultante};\n"
+                "COMMIT;"
+            )
+        except sqlite3.Error as exc:
+            self._rollback_quietly(conn)
+            logger.exception("Falló el script hacia la versión %s.", version_resultante)
+            raise SchemaInitializationError(
+                f"No se pudo llevar la base a la versión {version_resultante}: {exc}. "
+                "La base de datos quedó sin cambios."
+            ) from exc
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _leer(ruta: Path) -> str:
+        try:
+            return ruta.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.exception("No se pudo leer el script %s", ruta)
+            raise SchemaInitializationError(f"No se pudo leer {ruta}") from exc
+
+    @staticmethod
+    def _listar_migraciones(carpeta: Path) -> dict[int, Path]:
+        """{versión: archivo} para los archivos con forma NNN_descripcion.sql."""
+        if not carpeta.is_dir():
+            return {}
+        migraciones: dict[int, Path] = {}
+        for archivo in carpeta.glob("*.sql"):
+            coincidencia = re.match(r"^(\d{3})_.+\.sql$", archivo.name)
+            if coincidencia:
+                migraciones[int(coincidencia.group(1))] = archivo
+        return migraciones
 
     @staticmethod
     def _rollback_quietly(conn: sqlite3.Connection) -> None:
