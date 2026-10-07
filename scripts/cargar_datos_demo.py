@@ -14,7 +14,7 @@ import sys
 from datetime import date
 
 from src.business.models.estado_planta import EstadoPlanta
-from src.business.models.planta import DatosPlanta, TipoCombustible
+from src.business.models.planta import DatosPlanta, TipoAceite, TipoCombustible
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.services.planta_service import PlantaService
 from src.config import settings
@@ -28,28 +28,220 @@ G = TipoCombustible.GASOLINA
 
 # (marca, modelo, serie, kVA, kW, voltaje, fases, combustible, tanque, fecha, valor, horómetro)
 _PLANTAS_DEMO: list[tuple] = [
-    ("Caterpillar", "C9.3", "CAT-12345", 250, 200, "220/440 V", 3, D, 120, date(2022, 3, 15), 185_000_000, 1200),
-    ("Generac", "SD150", "GEN-98765", 150, 120, "120/240 V", 3, D, 80, date(2023, 1, 10), 98_000_000, 800),
-    ("Cummins", "C50D6", "CUM-50211", 50, 40, "120/240 V", 3, D, 45, date(2021, 7, 2), 42_000_000, 3100),
-    ("Perkins", "P110", "PER-11034", 110, 88, "220/440 V", 3, D, 60, date(2022, 11, 20), 76_500_000, 2050),
-    ("Honda", "EU7000is", "HON-70001", 7, 5.5, "120/240 V", 1, G, 5, date(2024, 2, 14), 18_900_000, 340),
-    ("Generac", "SD030", "GEN-30120", 30, 24, "120/240 V", 1, D, 30, date(2023, 6, 5), 31_000_000, 1200),
-    ("Kohler", "KD800", "KOH-80077", 800, 640, "440 V", 3, D, 400, date(2020, 9, 1), 520_000_000, 6400),
-    ("Caterpillar", "C4.4", "CAT-70450", 70, 56, "220 V", 3, D, 50, date(2023, 4, 18), 58_000_000, 900),
-    ("Perkins", "P33", "PER-33001", 33, 26, "120/240 V", 1, D, 35, date(2024, 8, 9), 29_500_000, 150),
-    ("Cummins", "C150D6", "CUM-15088", 150, 120, "220/440 V", 3, D, 90, date(2021, 12, 1), 101_000_000, 4700),
-    ("Generac", "SD050", "GEN-50066", 50, 40, "120/240 V", 3, D, 40, date(2024, 1, 22), 39_000_000, 610),
-    ("Kohler", "KD200", "KOH-20019", 200, 160, "220/440 V", 3, D, 110, date(2022, 5, 30), 140_000_000, 2800),
+    (
+        "Caterpillar",
+        "C9.3",
+        "CAT-12345",
+        250,
+        200,
+        "110/220 V",
+        3,
+        D,
+        120,
+        date(2022, 3, 15),
+        185_000_000,
+        1200,
+    ),
+    (
+        "Generac",
+        "SD150",
+        "GEN-98765",
+        150,
+        120,
+        "110/220 V",
+        3,
+        D,
+        80,
+        date(2023, 1, 10),
+        98_000_000,
+        800,
+    ),
+    (
+        "Cummins",
+        "C50D6",
+        "CUM-50211",
+        50,
+        40,
+        "110/220 V",
+        3,
+        D,
+        45,
+        date(2021, 7, 2),
+        42_000_000,
+        3100,
+    ),
+    (
+        "Perkins",
+        "P110",
+        "PER-11034",
+        110,
+        88,
+        "110/220 V",
+        3,
+        D,
+        60,
+        date(2022, 11, 20),
+        76_500_000,
+        2050,
+    ),
+    (
+        "Honda",
+        "EU7000is",
+        "HON-70001",
+        7,
+        5.5,
+        "110/220 V",
+        1,
+        G,
+        5,
+        date(2024, 2, 14),
+        18_900_000,
+        340,
+    ),
+    (
+        "Generac",
+        "SD030",
+        "GEN-30120",
+        30,
+        24,
+        "110/220 V",
+        1,
+        D,
+        30,
+        date(2023, 6, 5),
+        31_000_000,
+        1200,
+    ),
+    (
+        "Kohler",
+        "KD800",
+        "KOH-80077",
+        800,
+        640,
+        "110/220 V",
+        3,
+        D,
+        400,
+        date(2020, 9, 1),
+        520_000_000,
+        6400,
+    ),
+    (
+        "Caterpillar",
+        "C4.4",
+        "CAT-70450",
+        70,
+        56,
+        "110/220 V",
+        3,
+        D,
+        50,
+        date(2023, 4, 18),
+        58_000_000,
+        900,
+    ),
+    (
+        "Perkins",
+        "P33",
+        "PER-33001",
+        33,
+        26,
+        "110/220 V",
+        1,
+        D,
+        35,
+        date(2024, 8, 9),
+        29_500_000,
+        150,
+    ),
+    (
+        "Cummins",
+        "C150D6",
+        "CUM-15088",
+        150,
+        120,
+        "110/220 V",
+        3,
+        D,
+        90,
+        date(2021, 12, 1),
+        101_000_000,
+        4700,
+    ),
+    (
+        "Generac",
+        "SD050",
+        "GEN-50066",
+        50,
+        40,
+        "110/220 V",
+        3,
+        D,
+        40,
+        date(2024, 1, 22),
+        39_000_000,
+        610,
+    ),
+    (
+        "Kohler",
+        "KD200",
+        "KOH-20019",
+        200,
+        160,
+        "110/220 V",
+        3,
+        D,
+        110,
+        date(2022, 5, 30),
+        140_000_000,
+        2800,
+    ),
 ]
 
-# (posición de la planta en la lista, nuevo estado, motivo)
-_EVENTOS_DEMO: list[tuple[int, EstadoPlanta, str | None]] = [
-    (1, EstadoPlanta.ALQUILADA, None),
-    (3, EstadoPlanta.ALQUILADA, None),
-    (5, EstadoPlanta.EN_MANTENIMIENTO, None),
-    (2, EstadoPlanta.VENDIDA, "Venta a Constructora del Valle"),
-    (6, EstadoPlanta.DADA_DE_BAJA, "Motor fundido; reparación no rentable"),
-    (10, EstadoPlanta.RETIRADA, "Sin demanda; almacenada en bodega"),
+# Filtros y aceite por serial: (aceite, combustible/separador, agua, aire, galones, tipo)
+_CONSUMIBLES_DEMO: dict[str, tuple[str, str, str, str, float, TipoAceite]] = {
+    "CAT-12345": (
+        "CAT 1R-0739",
+        "CAT 1R-0762",
+        "CAT 9N-3368",
+        "CAT 6I-2501",
+        7.5,
+        TipoAceite.SAE_15W40,
+    ),
+    "GEN-98765": (
+        "Fleetguard LF3000",
+        "Fleetguard FS1280",
+        "Fleetguard WF2071",
+        "Donaldson P181052",
+        4.0,
+        TipoAceite.SAE_15W40,
+    ),
+    "PER-11034": (
+        "Perkins 2654407",
+        "Perkins 26560201",
+        "Fleetguard WF2073",
+        "Donaldson P822768",
+        3.5,
+        TipoAceite.SAE_25W60,
+    ),
+    "CUM-15088": (
+        "Fleetguard LF3000",
+        "Fleetguard FS1280",
+        "Fleetguard WF2071",
+        "Donaldson P181052",
+        4.0,
+        TipoAceite.SAE_15W40,
+    ),
+}
+
+# (posición de la planta en la lista, nuevo estado, motivo, lectura del horómetro)
+_EVENTOS_DEMO: list[tuple[int, EstadoPlanta, str | None, int | None]] = [
+    (1, EstadoPlanta.ALQUILADA, None, 820),
+    (3, EstadoPlanta.ALQUILADA, None, 2075),
+    (5, EstadoPlanta.EN_MANTENIMIENTO, None, None),
+    (2, EstadoPlanta.VENDIDA, "Venta a Constructora del Valle", None),
+    (6, EstadoPlanta.DADA_DE_BAJA, "Motor fundido; reparación no rentable", None),
+    (10, EstadoPlanta.RETIRADA, "Sin demanda; almacenada en bodega", None),
 ]
 
 
@@ -66,19 +258,38 @@ def main() -> int:
     plantas = []
     for fila in _PLANTAS_DEMO:
         marca, modelo, serie, kva, kw, voltaje, fases, comb, tanque, fecha, valor, horas = fila
+        aceite = combustible = agua = aire = None
+        galones: float | None = None
+        tipo_aceite: TipoAceite | None = None
+        if serie in _CONSUMIBLES_DEMO:
+            aceite, combustible, agua, aire, galones, tipo_aceite = _CONSUMIBLES_DEMO[serie]
         plantas.append(
             servicio.registrar(
                 DatosPlanta(
-                    marca=marca, modelo=modelo, numero_serie=serie, potencia_kva=kva,
-                    potencia_kw=kw, voltaje=voltaje, fases=fases, tipo_combustible=comb,
-                    capacidad_tanque_gal=tanque, fecha_adquisicion=fecha,
-                    valor_compra=valor, horometro_inicial=horas,
+                    marca=marca,
+                    modelo=modelo,
+                    numero_serie=serie,
+                    potencia_kva=kva,
+                    potencia_kw=kw,
+                    voltaje=voltaje,
+                    fases=fases,
+                    tipo_combustible=comb,
+                    capacidad_tanque_gal=tanque,
+                    fecha_adquisicion=fecha,
+                    valor_compra=valor,
+                    horometro_inicial=horas,
+                    filtro_aceite=aceite,
+                    filtro_combustible=combustible,
+                    filtro_agua=agua,
+                    filtro_aire=aire,
+                    cantidad_aceite_gal=galones,
+                    tipo_aceite=tipo_aceite,
                 )
             )
         )
 
-    for posicion, estado, motivo in _EVENTOS_DEMO:
-        servicio.cambiar_estado(plantas[posicion].id, estado, motivo=motivo)
+    for posicion, estado, motivo, horometro in _EVENTOS_DEMO:
+        servicio.cambiar_estado(plantas[posicion].id, estado, motivo=motivo, horometro=horometro)
 
     print(f"Se cargaron {len(plantas)} plantas de demostración en {db.db_path}")
     print(f"Números libres: {servicio.numeros_libres()} | Próximo: {servicio.proximo_numero()}")

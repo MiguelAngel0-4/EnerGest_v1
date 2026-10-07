@@ -45,7 +45,9 @@ class HistorialPlantaDialog(QDialog):
 
         pestanas = QTabWidget()
         pestanas.addTab(
-            self._tabla(["Fecha", "Estado anterior", "Estado nuevo", "Motivo"], filas_estados),
+            self._tabla(
+                ["Fecha", "Estado anterior", "Estado nuevo", "Horómetro", "Motivo"], filas_estados
+            ),
             f"Estados ({len(filas_estados)})",
         )
         pestanas.addTab(

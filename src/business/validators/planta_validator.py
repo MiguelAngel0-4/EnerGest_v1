@@ -43,6 +43,10 @@ def normalizar_datos(datos: DatosPlanta) -> DatosPlanta:
         numero_serie=_texto_opcional(datos.numero_serie),
         voltaje=_texto_opcional(datos.voltaje),
         observaciones=_texto_opcional(datos.observaciones),
+        filtro_aceite=_texto_opcional(datos.filtro_aceite),
+        filtro_combustible=_texto_opcional(datos.filtro_combustible),
+        filtro_agua=_texto_opcional(datos.filtro_agua),
+        filtro_aire=_texto_opcional(datos.filtro_aire),
     )
 
 
@@ -86,5 +90,8 @@ def validar_datos(datos: DatosPlanta, hoy: date) -> dict[str, str]:
 
     if datos.horometro_inicial < 0:
         errores["horometro_inicial"] = "El horómetro inicial no puede ser negativo."
+
+    if datos.cantidad_aceite_gal is not None and datos.cantidad_aceite_gal <= 0:
+        errores["cantidad_aceite_gal"] = "La cantidad de aceite debe ser mayor que 0."
 
     return errores

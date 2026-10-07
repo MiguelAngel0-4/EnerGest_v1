@@ -6,6 +6,11 @@ Ruta: src/presentation/dialogs/cambiar_estado_dialog.py
 Solo ofrece los destinos que el controlador le entrega, es decir, las
 transiciones válidas. Así el usuario nunca ve una opción que el sistema
 vaya a rechazar, como pasar directamente de "Alquilada" a "Vendida".
+
+La lectura del horómetro aparece solo cuando aplica: obligatoria al pasar a
+"Alquilada" y opcional al regresar del alquiler. El campo NO se pre-llena:
+se muestra la última lectura como referencia, para que el usuario vaya a
+mirar el horómetro real en lugar de aceptar un valor por inercia.
 """
 
 from datetime import date
@@ -27,6 +32,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.presentation.widgets.campo_numerico import CampoNumerico
+
 
 class OpcionEstado(NamedTuple):
     """Un destino posible, con lo que el usuario debe saber antes de elegirlo."""
@@ -35,12 +42,15 @@ class OpcionEstado(NamedTuple):
     etiqueta: str
     requiere_motivo: bool
     aviso: str
+    pide_horometro: bool = False
+    horometro_obligatorio: bool = False
 
 
 class CambiarEstadoDialog(QDialog):
     """Permite elegir el nuevo estado, el motivo y la fecha real del cambio."""
 
-    cambio_solicitado = Signal(str, str, object)  # (clave, motivo, fecha: date)
+    # (clave, motivo, fecha: date, horometro: int | None)
+    cambio_solicitado = Signal(str, str, object, object)
 
     def __init__(
         self,
@@ -48,6 +58,7 @@ class CambiarEstadoDialog(QDialog):
         estado_actual: str,
         opciones: list[OpcionEstado],
         fecha_minima: date,
+        ultima_lectura: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -87,16 +98,30 @@ class CambiarEstadoDialog(QDialog):
             "pero no anterior al último cambio de estado."
         )
 
+        self._etiqueta_horometro = QLabel("Lectura del horómetro (h):")
+        self._horometro = CampoNumerico(decimales=0, placeholder="Lectura actual")
+        self._referencia_horometro = QLabel(f"Última lectura registrada: {ultima_lectura}")
+        self._referencia_horometro.setObjectName("textoSecundario")
+        fila_horometro = QWidget()
+        fila_horometro.setObjectName("envolturaCampo")
+        layout_horometro = QVBoxLayout(fila_horometro)
+        layout_horometro.setContentsMargins(0, 0, 0, 0)
+        layout_horometro.setSpacing(2)
+        layout_horometro.addWidget(self._horometro)
+        layout_horometro.addWidget(self._referencia_horometro)
+
         self._error = QLabel()
         self._error.setObjectName("mensajeError")
         self._error.setWordWrap(True)
         self._error.hide()
 
-        formulario = QFormLayout()
-        formulario.addRow("Estado actual:", actual)
-        formulario.addRow("Nuevo estado:", self._combo)
-        formulario.addRow(self._etiqueta_motivo, self._motivo)
-        formulario.addRow("Fecha del cambio:", self._fecha)
+        self._formulario = QFormLayout()
+        self._formulario.addRow("Estado actual:", actual)
+        self._formulario.addRow("Nuevo estado:", self._combo)
+        self._formulario.addRow(self._etiqueta_motivo, self._motivo)
+        self._formulario.addRow(self._etiqueta_horometro, fila_horometro)
+        self._formulario.addRow("Fecha del cambio:", self._fecha)
+        self._fila_horometro = fila_horometro
 
         self._boton_actualizar = QPushButton("Actualizar estado")
         self._boton_actualizar.setObjectName("botonPrimario")
@@ -111,13 +136,16 @@ class CambiarEstadoDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(titulo)
-        layout.addLayout(formulario)
+        layout.addLayout(self._formulario)
         layout.addWidget(self._aviso)
         layout.addWidget(self._error)
         layout.addLayout(botones)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)  # Crece con avisos/errores
 
         self._combo.currentIndexChanged.connect(self._al_cambiar_opcion)
+        # El mensaje de error desaparece en cuanto el usuario empieza a corregir.
+        self._motivo.textChanged.connect(self._error.hide)
+        self._horometro.textChanged.connect(self._error.hide)
         self._al_cambiar_opcion()
 
     def _al_cambiar_opcion(self) -> None:
@@ -126,10 +154,16 @@ class CambiarEstadoDialog(QDialog):
         self._boton_actualizar.setEnabled(opcion is not None)
         self._error.hide()
 
+        pide_horometro = opcion is not None and opcion.pide_horometro
+        self._formulario.setRowVisible(self._fila_horometro, pide_horometro)
+
         if opcion is None:
             self._etiqueta_motivo.setText("Motivo:")
             self._aviso.hide()
             return
+
+        sufijo_horometro = "obligatoria" if opcion.horometro_obligatorio else "opcional"
+        self._etiqueta_horometro.setText(f"Lectura del horómetro (h, {sufijo_horometro}):")
 
         sufijo = "(obligatorio)" if opcion.requiere_motivo else "(opcional)"
         self._etiqueta_motivo.setText(f"Motivo {sufijo}:")
@@ -140,7 +174,11 @@ class CambiarEstadoDialog(QDialog):
         clave = self._combo.currentData()
         if clave is not None:
             self._error.hide()
-            self.cambio_solicitado.emit(clave, self._motivo.text(), self._fecha.date().toPython())
+            opcion = self._opciones[clave]
+            horometro = self._horometro.valor_entero() if opcion.pide_horometro else None
+            self.cambio_solicitado.emit(
+                clave, self._motivo.text(), self._fecha.date().toPython(), horometro
+            )
 
     # --- API pública ------------------------------------------------------
 
@@ -150,6 +188,8 @@ class CambiarEstadoDialog(QDialog):
         self._error.show()
         if "motivo" in errores:
             self._motivo.setFocus()
+        elif "horometro" in errores:
+            self._horometro.setFocus()
         elif "fecha" in errores:
             self._fecha.setFocus()
 

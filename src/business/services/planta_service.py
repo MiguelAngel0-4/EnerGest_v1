@@ -19,7 +19,13 @@ from src.business.exceptions import (
 )
 from src.business.interfaces.unidad_de_trabajo import FabricaUnidadDeTrabajo, IUnidadDeTrabajo
 from src.business.models.estado_planta import EstadoPlanta
-from src.business.models.planta import CambioEstado, DatosPlanta, Planta, RegistroConsecutivo
+from src.business.models.planta import (
+    CambioEstado,
+    DatosPlanta,
+    Planta,
+    RegistroConsecutivo,
+    TipoCombustible,
+)
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.validators.planta_validator import normalizar_datos, validar_datos
 
@@ -62,6 +68,8 @@ class PlantaService:
         hoy = self._hoy()
         datos = self._normalizar_y_validar(datos, hoy)
 
+        self._verificar_combustible_vigente(datos, combustible_anterior=None)
+
         with self._uow_factory() as uow:
             self._verificar_serie_unica(uow, datos.numero_serie, excluir_id=None)
 
@@ -95,7 +103,8 @@ class PlantaService:
         datos = self._normalizar_y_validar(datos, self._hoy())
 
         with self._uow_factory() as uow:
-            self._obtener_o_fallar(uow, planta_id)
+            actual = self._obtener_o_fallar(uow, planta_id)
+            self._verificar_combustible_vigente(datos, actual.datos.tipo_combustible)
             self._verificar_serie_unica(uow, datos.numero_serie, excluir_id=planta_id)
             uow.plantas.actualizar_datos(planta_id, datos)
             planta = self._obtener_o_fallar(uow, planta_id)
@@ -109,6 +118,7 @@ class PlantaService:
         nuevo: EstadoPlanta,
         motivo: str | None = None,
         fecha: date | None = None,
+        horometro: int | None = None,
     ) -> Planta:
         """
         Cambia el estado aplicando la máquina de estados y las reglas de consecutivos.
@@ -119,6 +129,9 @@ class PlantaService:
             motivo: Obligatorio al pasar a RETIRADA, VENDIDA o DADA_DE_BAJA.
             fecha: Fecha real del cambio (por defecto, hoy). Puede ser pasada,
                    pero no futura ni anterior al último cambio registrado.
+            horometro: Lectura del horómetro en el momento del cambio.
+                       Obligatoria al pasar a ALQUILADA; opcional en los demás casos.
+                       Nunca puede ser menor que la última lectura conocida.
 
         Raises:
             PlantaNoEncontradaError, TransicionInvalidaError, ValidacionError
@@ -133,6 +146,12 @@ class PlantaService:
             errores["fecha"] = "La fecha del cambio no puede ser futura."
         if nuevo.requiere_motivo and motivo_limpio is None:
             errores["motivo"] = f"Debe indicar el motivo para pasar a '{nuevo.etiqueta}'."
+        if nuevo.requiere_horometro and horometro is None:
+            errores["horometro"] = (
+                f"Debe registrar la lectura del horómetro para pasar a '{nuevo.etiqueta}'."
+            )
+        elif horometro is not None and horometro < 0:
+            errores["horometro"] = "La lectura del horómetro no puede ser negativa."
         if errores:
             raise ValidacionError(errores)
 
@@ -142,6 +161,17 @@ class PlantaService:
 
             if not actual.puede_pasar_a(nuevo):
                 raise TransicionInvalidaError(actual, nuevo)
+
+            # Un horómetro es como el odómetro de un carro: solo avanza.
+            if horometro is not None and horometro < planta.horometro_actual:
+                raise ValidacionError(
+                    {
+                        "horometro": (
+                            f"La lectura ({horometro} h) no puede ser menor que la última "
+                            f"registrada ({planta.horometro_actual} h)."
+                        )
+                    }
+                )
 
             cambios = uow.historial_estados.listar_por_planta(planta_id)
             if cambios and fecha_cambio < cambios[-1].fecha:
@@ -174,6 +204,7 @@ class PlantaService:
                     estado_nuevo=nuevo,
                     fecha=fecha_cambio,
                     motivo=motivo_limpio,
+                    horometro=horometro,
                 )
             )
             planta_actualizada = self._obtener_o_fallar(uow, planta_id)
@@ -254,6 +285,29 @@ class PlantaService:
         if errores:
             raise ValidacionError(errores)
         return datos_limpios
+
+    @staticmethod
+    def _verificar_combustible_vigente(
+        datos: DatosPlanta, combustible_anterior: TipoCombustible | None
+    ) -> None:
+        """
+        Un combustible retirado (Gas) solo se admite si la planta YA lo tenía:
+        se conserva el dato histórico, pero no se asigna a registros nuevos.
+        """
+        combustible = datos.tipo_combustible
+        if (
+            combustible is not None
+            and not combustible.vigente
+            and combustible != combustible_anterior
+        ):
+            raise ValidacionError(
+                {
+                    "tipo_combustible": (
+                        f"El combustible '{combustible.etiqueta}' ya no se admite. "
+                        "Elija Diésel o Gasolina."
+                    )
+                }
+            )
 
     @staticmethod
     def _verificar_serie_unica(

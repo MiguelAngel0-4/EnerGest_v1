@@ -22,30 +22,35 @@ class SqliteHistorialEstadoRepository:
     def registrar(self, cambio: CambioEstado) -> None:
         self._conn.execute(
             "INSERT INTO historial_estados "
-            "(planta_id, estado_anterior, estado_nuevo, fecha, motivo) VALUES (?, ?, ?, ?, ?)",
+            "(planta_id, estado_anterior, estado_nuevo, fecha, motivo, horometro) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (
                 cambio.planta_id,
                 cambio.estado_anterior.value if cambio.estado_anterior else None,
                 cambio.estado_nuevo.value,
                 fecha_a_texto(cambio.fecha),
                 cambio.motivo,
+                cambio.horometro,
             ),
         )
 
     def listar_por_planta(self, planta_id: int) -> list[CambioEstado]:
         # Orden por fecha y, en el mismo día, por orden de registro (id).
         filas = self._conn.execute(
-            "SELECT planta_id, estado_anterior, estado_nuevo, fecha, motivo "
+            "SELECT planta_id, estado_anterior, estado_nuevo, fecha, motivo, horometro "
             "FROM historial_estados WHERE planta_id = ? ORDER BY fecha, id",
             (planta_id,),
         ).fetchall()
         return [
             CambioEstado(
                 planta_id=f["planta_id"],
-                estado_anterior=EstadoPlanta(f["estado_anterior"]) if f["estado_anterior"] else None,
+                estado_anterior=(
+                    EstadoPlanta(f["estado_anterior"]) if f["estado_anterior"] else None
+                ),
                 estado_nuevo=EstadoPlanta(f["estado_nuevo"]),
                 fecha=texto_a_fecha_obligatoria(f["fecha"]),
                 motivo=f["motivo"],
+                horometro=f["horometro"],
             )
             for f in filas
         ]

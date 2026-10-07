@@ -46,6 +46,11 @@ class EstadoPlanta(StrEnum):
         """True si para ENTRAR a este estado se debe justificar el motivo."""
         return not self.en_operacion
 
+    @property
+    def requiere_horometro(self) -> bool:
+        """True si para ENTRAR a este estado se debe registrar la lectura del horómetro."""
+        return self is EstadoPlanta.ALQUILADA
+
     def destinos_posibles(self) -> frozenset["EstadoPlanta"]:
         """Estados a los que se puede pasar desde este (útil para la UI)."""
         return _TRANSICIONES[self]
