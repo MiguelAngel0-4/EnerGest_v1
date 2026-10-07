@@ -37,7 +37,9 @@ class FakePlantaRepository:
     def insertar(self, datos: DatosPlanta, numero: int, estado: EstadoPlanta) -> int:
         planta_id = self._a.siguiente_id
         self._a.siguiente_id += 1
-        self._a.plantas[planta_id] = Planta(planta_id, numero, estado, datos, FECHA_REGISTRO_FIJA)
+        self._a.plantas[planta_id] = Planta(
+            planta_id, numero, estado, datos, FECHA_REGISTRO_FIJA, datos.horometro_inicial
+        )
         return planta_id
 
     def actualizar_datos(self, planta_id: int, datos: DatosPlanta) -> None:
@@ -49,12 +51,24 @@ class FakePlantaRepository:
         )
 
     def obtener(self, planta_id: int) -> Planta | None:
-        return self._a.plantas.get(planta_id)
+        planta = self._a.plantas.get(planta_id)
+        return self._con_horometro_actual(planta) if planta else None
+
+    def _con_horometro_actual(self, planta: Planta) -> Planta:
+        """Calcula el horómetro actual igual que la consulta SQL del repositorio real."""
+        lecturas = [
+            c.horometro
+            for c in self._a.cambios
+            if c.planta_id == planta.id and c.horometro is not None
+        ]
+        return replace(
+            planta, horometro_actual=max([planta.datos.horometro_inicial, *lecturas])
+        )
 
     def listar(
         self, estados: set[EstadoPlanta] | None = None, texto: str | None = None
     ) -> list[Planta]:
-        resultado = list(self._a.plantas.values())
+        resultado = [self._con_horometro_actual(p) for p in self._a.plantas.values()]
         if estados is not None:
             resultado = [p for p in resultado if p.estado in estados]
         if texto:

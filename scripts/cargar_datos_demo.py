@@ -14,7 +14,7 @@ import sys
 from datetime import date
 
 from src.business.models.estado_planta import EstadoPlanta
-from src.business.models.planta import DatosPlanta, TipoCombustible
+from src.business.models.planta import DatosPlanta, TipoAceite, TipoCombustible
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.services.planta_service import PlantaService
 from src.config import settings
@@ -42,14 +42,33 @@ _PLANTAS_DEMO: list[tuple] = [
     ("Kohler", "KD200", "KOH-20019", 200, 160, "220/440 V", 3, D, 110, date(2022, 5, 30), 140_000_000, 2800),
 ]
 
-# (posición de la planta en la lista, nuevo estado, motivo)
-_EVENTOS_DEMO: list[tuple[int, EstadoPlanta, str | None]] = [
-    (1, EstadoPlanta.ALQUILADA, None),
-    (3, EstadoPlanta.ALQUILADA, None),
-    (5, EstadoPlanta.EN_MANTENIMIENTO, None),
-    (2, EstadoPlanta.VENDIDA, "Venta a Constructora del Valle"),
-    (6, EstadoPlanta.DADA_DE_BAJA, "Motor fundido; reparación no rentable"),
-    (10, EstadoPlanta.RETIRADA, "Sin demanda; almacenada en bodega"),
+# Filtros y aceite por serial: (aceite, combustible/separador, agua, aire, galones, tipo)
+_CONSUMIBLES_DEMO: dict[str, tuple[str, str, str, str, float, TipoAceite]] = {
+    "CAT-12345": (
+        "CAT 1R-0739", "CAT 1R-0762", "CAT 9N-3368", "CAT 6I-2501", 7.5, TipoAceite.SAE_15W40
+    ),
+    "GEN-98765": (
+        "Fleetguard LF3000", "Fleetguard FS1280", "Fleetguard WF2071", "Donaldson P181052",
+        4.0, TipoAceite.SAE_15W40,
+    ),
+    "PER-11034": (
+        "Perkins 2654407", "Perkins 26560201", "Fleetguard WF2073", "Donaldson P822768",
+        3.5, TipoAceite.SAE_25W60,
+    ),
+    "CUM-15088": (
+        "Fleetguard LF3000", "Fleetguard FS1280", "Fleetguard WF2071", "Donaldson P181052",
+        4.0, TipoAceite.SAE_15W40,
+    ),
+}
+
+# (posición de la planta en la lista, nuevo estado, motivo, lectura del horómetro)
+_EVENTOS_DEMO: list[tuple[int, EstadoPlanta, str | None, int | None]] = [
+    (1, EstadoPlanta.ALQUILADA, None, 820),
+    (3, EstadoPlanta.ALQUILADA, None, 2075),
+    (5, EstadoPlanta.EN_MANTENIMIENTO, None, None),
+    (2, EstadoPlanta.VENDIDA, "Venta a Constructora del Valle", None),
+    (6, EstadoPlanta.DADA_DE_BAJA, "Motor fundido; reparación no rentable", None),
+    (10, EstadoPlanta.RETIRADA, "Sin demanda; almacenada en bodega", None),
 ]
 
 
@@ -66,6 +85,11 @@ def main() -> int:
     plantas = []
     for fila in _PLANTAS_DEMO:
         marca, modelo, serie, kva, kw, voltaje, fases, comb, tanque, fecha, valor, horas = fila
+        aceite = combustible = agua = aire = None
+        galones: float | None = None
+        tipo_aceite: TipoAceite | None = None
+        if serie in _CONSUMIBLES_DEMO:
+            aceite, combustible, agua, aire, galones, tipo_aceite = _CONSUMIBLES_DEMO[serie]
         plantas.append(
             servicio.registrar(
                 DatosPlanta(
@@ -73,12 +97,14 @@ def main() -> int:
                     potencia_kw=kw, voltaje=voltaje, fases=fases, tipo_combustible=comb,
                     capacidad_tanque_gal=tanque, fecha_adquisicion=fecha,
                     valor_compra=valor, horometro_inicial=horas,
+                    filtro_aceite=aceite, filtro_combustible=combustible, filtro_agua=agua,
+                    filtro_aire=aire, cantidad_aceite_gal=galones, tipo_aceite=tipo_aceite,
                 )
             )
         )
 
-    for posicion, estado, motivo in _EVENTOS_DEMO:
-        servicio.cambiar_estado(plantas[posicion].id, estado, motivo=motivo)
+    for posicion, estado, motivo, horometro in _EVENTOS_DEMO:
+        servicio.cambiar_estado(plantas[posicion].id, estado, motivo=motivo, horometro=horometro)
 
     print(f"Se cargaron {len(plantas)} plantas de demostración en {db.db_path}")
     print(f"Números libres: {servicio.numeros_libres()} | Próximo: {servicio.proximo_numero()}")

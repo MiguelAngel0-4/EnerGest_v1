@@ -15,7 +15,7 @@ import sqlite3
 from typing import Any, Final
 
 from src.business.models.estado_planta import EstadoPlanta
-from src.business.models.planta import DatosPlanta, Planta, TipoCombustible
+from src.business.models.planta import DatosPlanta, Planta, TipoAceite, TipoCombustible
 from src.infrastructure.repositories.conversiones import (
     escapar_like,
     fecha_a_texto,
@@ -39,7 +39,25 @@ _COLUMNAS_DATOS: Final[tuple[str, ...]] = (
     "valor_compra",
     "horometro_inicial",
     "observaciones",
+    "filtro_aceite",
+    "filtro_combustible",
+    "filtro_agua",
+    "filtro_aire",
+    "cantidad_aceite_gal",
+    "tipo_aceite",
 )
+
+# Consulta base: todas las columnas + el horómetro actual CALCULADO (no se guarda
+# duplicado). Es el mayor valor entre el horómetro inicial y las lecturas de los
+# cambios de estado. Cuando exista el módulo de mantenimientos, se sumarán aquí
+# sus lecturas. MAX(a, b) con dos argumentos es el máximo escalar de SQLite.
+_SQL_SELECT: Final[str] = """
+    SELECT p.*,
+           MAX(p.horometro_inicial,
+               COALESCE((SELECT MAX(h.horometro) FROM historial_estados h
+                         WHERE h.planta_id = p.id), 0)) AS horometro_actual
+    FROM plantas p
+"""
 
 _SQL_INSERTAR: Final[str] = (
     "INSERT INTO plantas (numero_consecutivo, estado, "
@@ -85,7 +103,7 @@ class SqlitePlantaRepository:
         )
 
     def obtener(self, planta_id: int) -> Planta | None:
-        fila = self._conn.execute("SELECT * FROM plantas WHERE id = ?", (planta_id,)).fetchone()
+        fila = self._conn.execute(_SQL_SELECT + " WHERE p.id = ?", (planta_id,)).fetchone()
         return _fila_a_planta(fila) if fila is not None else None
 
     def listar(
@@ -98,22 +116,22 @@ class SqlitePlantaRepository:
             if not estados:
                 return []
             marcadores = ", ".join("?" for _ in estados)
-            condiciones.append(f"estado IN ({marcadores})")
+            condiciones.append(f"p.estado IN ({marcadores})")
             parametros.extend(sorted(e.value for e in estados))
 
         if texto:
             patron = f"%{escapar_like(texto)}%"
             condiciones.append(
-                "(marca LIKE ? ESCAPE '\\' OR modelo LIKE ? ESCAPE '\\' "
-                "OR numero_serie LIKE ? ESCAPE '\\')"
+                "(p.marca LIKE ? ESCAPE '\\' OR p.modelo LIKE ? ESCAPE '\\' "
+                "OR p.numero_serie LIKE ? ESCAPE '\\')"
             )
             parametros.extend([patron, patron, patron])
 
-        sql = "SELECT * FROM plantas"
+        sql = _SQL_SELECT
         if condiciones:
             sql += " WHERE " + " AND ".join(condiciones)
         # Primero las plantas con número (en orden), al final las que no tienen.
-        sql += " ORDER BY numero_consecutivo IS NULL, numero_consecutivo, id"
+        sql += " ORDER BY p.numero_consecutivo IS NULL, p.numero_consecutivo, p.id"
 
         return [_fila_a_planta(f) for f in self._conn.execute(sql, parametros).fetchall()]
 
@@ -143,12 +161,19 @@ def _datos_a_parametros(datos: DatosPlanta) -> dict[str, Any]:
         "valor_compra": datos.valor_compra,
         "horometro_inicial": datos.horometro_inicial,
         "observaciones": datos.observaciones,
+        "filtro_aceite": datos.filtro_aceite,
+        "filtro_combustible": datos.filtro_combustible,
+        "filtro_agua": datos.filtro_agua,
+        "filtro_aire": datos.filtro_aire,
+        "cantidad_aceite_gal": datos.cantidad_aceite_gal,
+        "tipo_aceite": datos.tipo_aceite.value if datos.tipo_aceite else None,
     }
 
 
 def _fila_a_planta(fila: sqlite3.Row) -> Planta:
     """Convierte una fila de la tabla plantas en un objeto Planta."""
     combustible = fila["tipo_combustible"]
+    aceite = fila["tipo_aceite"]
     datos = DatosPlanta(
         marca=fila["marca"],
         potencia_kva=fila["potencia_kva"],
@@ -163,6 +188,12 @@ def _fila_a_planta(fila: sqlite3.Row) -> Planta:
         valor_compra=fila["valor_compra"],
         horometro_inicial=fila["horometro_inicial"],
         observaciones=fila["observaciones"],
+        filtro_aceite=fila["filtro_aceite"],
+        filtro_combustible=fila["filtro_combustible"],
+        filtro_agua=fila["filtro_agua"],
+        filtro_aire=fila["filtro_aire"],
+        cantidad_aceite_gal=fila["cantidad_aceite_gal"],
+        tipo_aceite=TipoAceite(aceite) if aceite else None,
     )
     return Planta(
         id=fila["id"],
@@ -170,4 +201,5 @@ def _fila_a_planta(fila: sqlite3.Row) -> Planta:
         estado=EstadoPlanta(fila["estado"]),
         datos=datos,
         fecha_registro=texto_a_fecha_hora(fila["fecha_registro"]),
+        horometro_actual=int(fila["horometro_actual"]),
     )

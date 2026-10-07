@@ -103,16 +103,18 @@ def test_motivo_obligatorio_al_salir_de_operacion(servicio: PlantaService) -> No
     assert "motivo" in error.value.errores
 
 
-def test_alquilar_no_requiere_motivo_ni_cambia_numero(servicio: PlantaService) -> None:
+def test_alquilar_con_lectura_no_requiere_motivo_ni_cambia_numero(
+    servicio: PlantaService,
+) -> None:
     planta = servicio.registrar(_datos())
-    alquilada = servicio.cambiar_estado(planta.id, E.ALQUILADA)
+    alquilada = servicio.cambiar_estado(planta.id, E.ALQUILADA, horometro=150)
     assert alquilada.estado is E.ALQUILADA
     assert alquilada.numero_consecutivo == 1
 
 
 def test_transicion_invalida(servicio: PlantaService) -> None:
     planta = servicio.registrar(_datos())
-    servicio.cambiar_estado(planta.id, E.ALQUILADA)
+    servicio.cambiar_estado(planta.id, E.ALQUILADA, horometro=150)
     with pytest.raises(TransicionInvalidaError):
         servicio.cambiar_estado(planta.id, E.VENDIDA, motivo="Venta")
 
@@ -120,14 +122,14 @@ def test_transicion_invalida(servicio: PlantaService) -> None:
 def test_fecha_futura_rechazada(servicio: PlantaService) -> None:
     planta = servicio.registrar(_datos())
     with pytest.raises(ValidacionError) as error:
-        servicio.cambiar_estado(planta.id, E.ALQUILADA, fecha=date(2026, 10, 1))
+        servicio.cambiar_estado(planta.id, E.ALQUILADA, fecha=date(2026, 10, 1), horometro=150)
     assert "fecha" in error.value.errores
 
 
 def test_fecha_anterior_al_ultimo_cambio_rechazada(servicio: PlantaService) -> None:
     planta = servicio.registrar(_datos())  # Registrada el 2026-09-30
     with pytest.raises(ValidacionError):
-        servicio.cambiar_estado(planta.id, E.ALQUILADA, fecha=date(2026, 9, 1))
+        servicio.cambiar_estado(planta.id, E.ALQUILADA, fecha=date(2026, 9, 1), horometro=150)
 
 
 def test_reactivar_recupera_su_numero_si_esta_libre(servicio: PlantaService) -> None:

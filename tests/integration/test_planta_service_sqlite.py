@@ -93,7 +93,7 @@ def test_todos_los_campos_se_guardan_y_recuperan_intactos(servicio: PlantaServic
 
 def test_actualizar_datos_no_altera_estado_ni_numero(servicio: PlantaService) -> None:
     planta = servicio.registrar(_datos())
-    servicio.cambiar_estado(planta.id, E.ALQUILADA)
+    servicio.cambiar_estado(planta.id, E.ALQUILADA, horometro=150)
     actualizada = servicio.actualizar_datos(planta.id, _datos(marca="Cummins Power"))
 
     assert actualizada.datos.marca == "Cummins Power"

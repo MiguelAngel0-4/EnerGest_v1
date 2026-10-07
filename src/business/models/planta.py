@@ -21,11 +21,24 @@ class TipoCombustible(StrEnum):
 
     DIESEL = "DIESEL"
     GASOLINA = "GASOLINA"
+    GAS = "GAS"
 
     @property
     def etiqueta(self) -> str:
         """Nombre legible para mostrar al usuario."""
-        return {"DIESEL": "Diésel", "GASOLINA": "Gasolina"}[self.value]
+        return {"DIESEL": "Diésel", "GASOLINA": "Gasolina", "GAS": "Gas"}[self.value]
+
+
+class TipoAceite(StrEnum):
+    """Tipos de aceite de motor admitidos (clasificación de viscosidad SAE)."""
+
+    SAE_15W40 = "SAE_15W40"
+    SAE_25W60 = "SAE_25W60"
+
+    @property
+    def etiqueta(self) -> str:
+        """Nombre legible para mostrar al usuario."""
+        return {"SAE_15W40": "15W-40", "SAE_25W60": "25W-60"}[self.value]
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +58,13 @@ class DatosPlanta:
     valor_compra: int | None = None
     horometro_inicial: int = 0
     observaciones: str | None = None
+    # Consumibles de mantenimiento (versión 2 del esquema)
+    filtro_aceite: str | None = None
+    filtro_combustible: str | None = None  # Filtro de combustible / separador de agua
+    filtro_agua: str | None = None
+    filtro_aire: str | None = None
+    cantidad_aceite_gal: float | None = None
+    tipo_aceite: TipoAceite | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +76,9 @@ class Planta:
     estado: EstadoPlanta
     datos: DatosPlanta
     fecha_registro: datetime
+    # Última lectura conocida: el mayor valor entre el horómetro inicial y las
+    # lecturas registradas en los cambios de estado. Lo calcula el repositorio.
+    horometro_actual: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,3 +106,4 @@ class CambioEstado:
     estado_nuevo: EstadoPlanta
     fecha: date
     motivo: str | None = None
+    horometro: int | None = None  # Lectura del horómetro al momento del cambio

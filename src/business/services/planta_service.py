@@ -109,6 +109,7 @@ class PlantaService:
         nuevo: EstadoPlanta,
         motivo: str | None = None,
         fecha: date | None = None,
+        horometro: int | None = None,
     ) -> Planta:
         """
         Cambia el estado aplicando la máquina de estados y las reglas de consecutivos.
@@ -119,6 +120,9 @@ class PlantaService:
             motivo: Obligatorio al pasar a RETIRADA, VENDIDA o DADA_DE_BAJA.
             fecha: Fecha real del cambio (por defecto, hoy). Puede ser pasada,
                    pero no futura ni anterior al último cambio registrado.
+            horometro: Lectura del horómetro en el momento del cambio.
+                       Obligatoria al pasar a ALQUILADA; opcional en los demás casos.
+                       Nunca puede ser menor que la última lectura conocida.
 
         Raises:
             PlantaNoEncontradaError, TransicionInvalidaError, ValidacionError
@@ -133,6 +137,12 @@ class PlantaService:
             errores["fecha"] = "La fecha del cambio no puede ser futura."
         if nuevo.requiere_motivo and motivo_limpio is None:
             errores["motivo"] = f"Debe indicar el motivo para pasar a '{nuevo.etiqueta}'."
+        if nuevo.requiere_horometro and horometro is None:
+            errores["horometro"] = (
+                f"Debe registrar la lectura del horómetro para pasar a '{nuevo.etiqueta}'."
+            )
+        elif horometro is not None and horometro < 0:
+            errores["horometro"] = "La lectura del horómetro no puede ser negativa."
         if errores:
             raise ValidacionError(errores)
 
@@ -142,6 +152,17 @@ class PlantaService:
 
             if not actual.puede_pasar_a(nuevo):
                 raise TransicionInvalidaError(actual, nuevo)
+
+            # Un horómetro es como el odómetro de un carro: solo avanza.
+            if horometro is not None and horometro < planta.horometro_actual:
+                raise ValidacionError(
+                    {
+                        "horometro": (
+                            f"La lectura ({horometro} h) no puede ser menor que la última "
+                            f"registrada ({planta.horometro_actual} h)."
+                        )
+                    }
+                )
 
             cambios = uow.historial_estados.listar_por_planta(planta_id)
             if cambios and fecha_cambio < cambios[-1].fecha:
@@ -174,6 +195,7 @@ class PlantaService:
                     estado_nuevo=nuevo,
                     fecha=fecha_cambio,
                     motivo=motivo_limpio,
+                    horometro=horometro,
                 )
             )
             planta_actualizada = self._obtener_o_fallar(uow, planta_id)
