@@ -11,21 +11,22 @@ bien, el controlador cierra el diálogo.
 Las claves del diccionario de valores son los mismos nombres de campo de
 DatosPlanta. Así, los errores del servicio ({"potencia_kva": "..."})
 se pueden ubicar directamente en el campo correspondiente.
+
+Los campos numéricos usan CampoNumerico (no QSpinBox): ver la explicación
+del defecto corregido en src/presentation/widgets/campo_numerico.py.
 """
 
-import re
+from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Final
+from typing import Any
 
 from PySide6.QtCore import QDate, Qt, Signal
-from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (
-    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
+    QCompleter,
     QDateEdit,
     QDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -36,12 +37,32 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-_SIN_DATO: Final[str] = "—"
+from src.presentation.widgets.campo_numerico import CampoNumerico
+
+# Campos de referencia de filtros: nombre en DatosPlanta -> etiqueta visible.
+CAMPOS_FILTROS: dict[str, str] = {
+    "filtro_aceite": "Filtro de aceite",
+    "filtro_combustible": "Filtro de combustible / separador",
+    "filtro_agua": "Filtro de agua",
+    "filtro_aire": "Filtro de aire",
+}
+
+
+@dataclass(frozen=True)
+class OpcionesFormulario:
+    """Listas que el controlador entrega para llenar combos y sugerencias."""
+
+    marcas: list[str]
+    opciones_fases: list[tuple[str, int | None]]
+    opciones_combustible: list[tuple[str, str | None]]
+    opciones_aceite: list[tuple[str, str | None]]
+    voltajes: list[str]
+    # Referencias de filtros ya registradas, por campo, para sugerirlas al escribir.
+    sugerencias_filtros: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _marcar_error(widget: QWidget, con_error: bool) -> None:
@@ -61,10 +82,7 @@ class PlantaFormDialog(QDialog):
         titulo: str,
         texto_consecutivo: str,
         texto_estado: str,
-        marcas: list[str],
-        opciones_fases: list[tuple[str, int | None]],
-        opciones_combustible: list[tuple[str, str | None]],
-        voltajes: list[str],
+        opciones: OpcionesFormulario,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -74,25 +92,19 @@ class PlantaFormDialog(QDialog):
         # campo -> (widget que recibe el borde rojo, etiqueta del mensaje de error)
         self._campos: dict[str, tuple[QWidget, QLabel]] = {}
 
-        self._crear_controles(marcas, opciones_fases, opciones_combustible, voltajes)
+        self._crear_controles(opciones)
         self._construir_interfaz(titulo, texto_consecutivo, texto_estado)
 
     # ------------------------------------------------------------------ #
     # Construcción
     # ------------------------------------------------------------------ #
 
-    def _crear_controles(
-        self,
-        marcas: list[str],
-        opciones_fases: list[tuple[str, int | None]],
-        opciones_combustible: list[tuple[str, str | None]],
-        voltajes: list[str],
-    ) -> None:
+    def _crear_controles(self, opciones: OpcionesFormulario) -> None:
         # Marca: combo editable que sugiere marcas existentes (evita "Cummins" vs "cummins").
         self._marca = QComboBox()
         self._marca.setEditable(True)
         self._marca.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self._marca.addItems(marcas)
+        self._marca.addItems(opciones.marcas)
         self._marca.setCurrentIndex(-1)
         self._marca.lineEdit().setPlaceholderText("Ej. Cummins")
         completador = self._marca.completer()
@@ -102,23 +114,38 @@ class PlantaFormDialog(QDialog):
         self._modelo = QLineEdit()
         self._numero_serie = QLineEdit()
 
-        self._potencia_kva = self._spin_decimal(100_000, " kVA", opcional=False)
-        self._potencia_kw = self._spin_decimal(100_000, " kW", opcional=True)
-        self._capacidad_tanque = self._spin_decimal(100_000, " gal", opcional=True)
+        # Numéricos: vacíos = "sin dato". Aceptan coma o punto decimal.
+        self._potencia_kva = CampoNumerico(decimales=2, placeholder="Ej. 100")
+        self._potencia_kw = CampoNumerico(decimales=2, placeholder="Opcional")
+        self._capacidad_tanque = CampoNumerico(decimales=2, placeholder="Opcional")
+        self._horometro = CampoNumerico(decimales=0, placeholder="Ej. 1.200")
+        self._valor_compra = CampoNumerico(
+            decimales=0, max_digitos=15, placeholder="Ej. 85.000.000"
+        )
+        self._cantidad_aceite = CampoNumerico(decimales=2, placeholder="Ej. 2,5")
 
         self._voltaje = QComboBox()
         self._voltaje.setEditable(True)
-        self._voltaje.addItems(voltajes)
+        self._voltaje.addItems(opciones.voltajes)
         self._voltaje.setCurrentIndex(-1)
         self._voltaje.lineEdit().setPlaceholderText("Ej. 120/240 V")
 
-        self._fases = QComboBox()
-        for texto, clave in opciones_fases:
-            self._fases.addItem(texto, clave)
+        self._fases = self._combo(opciones.opciones_fases)
+        self._combustible = self._combo(opciones.opciones_combustible)
+        self._tipo_aceite = self._combo(opciones.opciones_aceite)
 
-        self._combustible = QComboBox()
-        for texto, clave in opciones_combustible:
-            self._combustible.addItem(texto, clave)
+        # Filtros: texto libre con sugerencias de referencias ya registradas.
+        self._filtros: dict[str, QLineEdit] = {}
+        for nombre in CAMPOS_FILTROS:
+            campo = QLineEdit()
+            campo.setPlaceholderText("Referencia, ej. Fleetguard LF3000")
+            sugerencias = opciones.sugerencias_filtros.get(nombre, [])
+            if sugerencias:
+                completador_filtro = QCompleter(sugerencias, campo)
+                completador_filtro.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                completador_filtro.setFilterMode(Qt.MatchFlag.MatchContains)
+                campo.setCompleter(completador_filtro)
+            self._filtros[nombre] = campo
 
         # Fecha: QDateEdit no admite "vacío", por eso se acompaña de una casilla.
         self._fecha_conocida = QCheckBox("Registrar fecha")
@@ -130,35 +157,15 @@ class PlantaFormDialog(QDialog):
         self._fecha.setEnabled(False)
         self._fecha_conocida.toggled.connect(self._fecha.setEnabled)
 
-        # Valor de compra: texto (QSpinBox solo llega a 2.147.483.647).
-        self._valor_compra = QLineEdit()
-        self._valor_compra.setPlaceholderText("Ej. 85.000.000")
-        self._valor_compra.setValidator(
-            QRegularExpressionValidator(r"[0-9.]{0,19}", self._valor_compra)
-        )
-        self._valor_compra.editingFinished.connect(self._formatear_valor_compra)
-
-        self._horometro = QSpinBox()
-        self._horometro.setRange(0, 9_999_999)
-        self._horometro.setSuffix(" h")
-        self._horometro.setGroupSeparatorShown(True)
-        self._horometro.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-
         self._observaciones = QPlainTextEdit()
         self._observaciones.setFixedHeight(64)
 
     @staticmethod
-    def _spin_decimal(maximo: float, sufijo: str, opcional: bool) -> QDoubleSpinBox:
-        """Campo numérico decimal. Si es opcional, el valor 0 se muestra como "—" (sin dato)."""
-        spin = QDoubleSpinBox()
-        spin.setRange(0, maximo)
-        spin.setDecimals(2)
-        spin.setSuffix(sufijo)
-        spin.setGroupSeparatorShown(True)
-        spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        if opcional:
-            spin.setSpecialValueText(_SIN_DATO)
-        return spin
+    def _combo(opciones: list[tuple[str, Any]]) -> QComboBox:
+        combo = QComboBox()
+        for texto, clave in opciones:
+            combo.addItem(texto, clave)
+        return combo
 
     def _construir_interfaz(
         self, titulo: str, texto_consecutivo: str, texto_estado: str
@@ -189,7 +196,7 @@ class PlantaFormDialog(QDialog):
         tecnico.addRow("Fases", self._campo("fases", self._fases))
         tecnico.addRow("Tipo de combustible", self._campo("tipo_combustible", self._combustible))
         tecnico.addRow(
-            "Capacidad del tanque", self._campo("capacidad_tanque_gal", self._capacidad_tanque)
+            "Tanque (galones)", self._campo("capacidad_tanque_gal", self._capacidad_tanque)
         )
         caja_tecnica = QGroupBox("Especificaciones técnicas")
         caja_tecnica.setLayout(tecnico)
@@ -202,19 +209,28 @@ class PlantaFormDialog(QDialog):
         layout_fecha.addWidget(self._fecha_conocida)
         layout_fecha.addWidget(self._fecha, stretch=1)
 
-        adquisicion = QGridLayout()
-        adquisicion.addWidget(QLabel("Fecha de adquisición"), 0, 0)
-        adquisicion.addWidget(self._campo("fecha_adquisicion", fila_fecha, self._fecha), 0, 1)
-        adquisicion.addWidget(QLabel("Valor de compra ($)"), 0, 2)
-        adquisicion.addWidget(self._campo("valor_compra", self._valor_compra), 0, 3)
-        adquisicion.addWidget(QLabel("Horómetro inicial"), 1, 0)
-        adquisicion.addWidget(self._campo("horometro_inicial", self._horometro), 1, 1)
-        adquisicion.addWidget(QLabel("Observaciones"), 2, 0, Qt.AlignmentFlag.AlignTop)
-        adquisicion.addWidget(self._campo("observaciones", self._observaciones), 2, 1, 1, 3)
-        adquisicion.setColumnStretch(1, 1)
-        adquisicion.setColumnStretch(3, 1)
+        adquisicion = QFormLayout()
+        adquisicion.addRow(
+            "Fecha de adquisición", self._campo("fecha_adquisicion", fila_fecha, self._fecha)
+        )
+        adquisicion.addRow("Valor de compra ($)", self._campo("valor_compra", self._valor_compra))
+        adquisicion.addRow(
+            "Horómetro inicial (h)", self._campo("horometro_inicial", self._horometro)
+        )
+        adquisicion.addRow("Observaciones", self._campo("observaciones", self._observaciones))
         caja_adquisicion = QGroupBox("Adquisición y operación")
         caja_adquisicion.setLayout(adquisicion)
+
+        # Grupo 4: consumibles de mantenimiento (pedido en la validación del MVP 1)
+        mantenimiento = QFormLayout()
+        for nombre, etiqueta in CAMPOS_FILTROS.items():
+            mantenimiento.addRow(etiqueta, self._campo(nombre, self._filtros[nombre]))
+        mantenimiento.addRow(
+            "Cantidad de aceite (gal)", self._campo("cantidad_aceite_gal", self._cantidad_aceite)
+        )
+        mantenimiento.addRow("Tipo de aceite", self._campo("tipo_aceite", self._tipo_aceite))
+        caja_mantenimiento = QGroupBox("Mantenimiento: filtros y aceite")
+        caja_mantenimiento.setLayout(mantenimiento)
 
         # Botones
         boton_guardar = QPushButton("Guardar")
@@ -231,15 +247,19 @@ class PlantaFormDialog(QDialog):
         botones.addWidget(boton_cancelar)
         botones.addWidget(boton_guardar)
 
-        columnas = QHBoxLayout()
-        columnas.addWidget(caja_general, stretch=1)
-        columnas.addWidget(caja_tecnica, stretch=1)
+        # Cuadrícula de 2 x 2 grupos, como la ficha técnica del wireframe.
+        grupos = QGridLayout()
+        grupos.addWidget(caja_general, 0, 0)
+        grupos.addWidget(caja_tecnica, 0, 1)
+        grupos.addWidget(caja_adquisicion, 1, 0)
+        grupos.addWidget(caja_mantenimiento, 1, 1)
+        grupos.setColumnStretch(0, 1)
+        grupos.setColumnStretch(1, 1)
 
         layout = QVBoxLayout(self)
         layout.addWidget(encabezado)
         layout.addWidget(self._mensaje_general)
-        layout.addLayout(columnas)
-        layout.addWidget(caja_adquisicion)
+        layout.addLayout(grupos)
         layout.addLayout(botones)
         # El diálogo se ajusta solo a su contenido: al aparecer mensajes de error
         # crece lo necesario para mostrarlos completos, sin recortarlos.
@@ -285,57 +305,59 @@ class PlantaFormDialog(QDialog):
         self.limpiar_errores()
         self.guardar_solicitado.emit(self.valores())
 
-    def _formatear_valor_compra(self) -> None:
-        """Muestra el valor con separador de miles al salir del campo: 85000000 -> 85.000.000."""
-        digitos = re.sub(r"\D", "", self._valor_compra.text())
-        self._valor_compra.setText(f"{int(digitos):,}".replace(",", ".") if digitos else "")
-
     # ------------------------------------------------------------------ #
     # API pública
     # ------------------------------------------------------------------ #
 
     def valores(self) -> dict[str, Any]:
         """Lee el formulario y devuelve los valores con sus tipos de Python."""
-        digitos_valor = re.sub(r"\D", "", self._valor_compra.text())
-        return {
+        valores: dict[str, Any] = {
             "marca": self._marca.currentText(),
             "modelo": self._modelo.text(),
             "numero_serie": self._numero_serie.text(),
-            "potencia_kva": self._potencia_kva.value(),
-            "potencia_kw": self._valor_opcional(self._potencia_kw),
+            "potencia_kva": self._potencia_kva.valor(),
+            "potencia_kw": self._potencia_kw.valor(),
             "voltaje": self._voltaje.currentText(),
             "fases": self._fases.currentData(),
             "tipo_combustible": self._combustible.currentData(),
-            "capacidad_tanque_gal": self._valor_opcional(self._capacidad_tanque),
+            "capacidad_tanque_gal": self._capacidad_tanque.valor(),
             "fecha_adquisicion": (
                 self._fecha.date().toPython() if self._fecha_conocida.isChecked() else None
             ),
-            "valor_compra": int(digitos_valor) if digitos_valor else None,
-            "horometro_inicial": self._horometro.value(),
+            "valor_compra": self._valor_compra.valor_entero(),
+            "horometro_inicial": self._horometro.valor_entero(),
             "observaciones": self._observaciones.toPlainText(),
+            "cantidad_aceite_gal": self._cantidad_aceite.valor(),
+            "tipo_aceite": self._tipo_aceite.currentData(),
         }
+        for nombre, campo in self._filtros.items():
+            valores[nombre] = campo.text()
+        return valores
 
     def cargar_valores(self, valores: dict[str, Any]) -> None:
         """Llena el formulario con los datos de una planta existente (modo edición)."""
         self._marca.setCurrentText(valores.get("marca") or "")
         self._modelo.setText(valores.get("modelo") or "")
         self._numero_serie.setText(valores.get("numero_serie") or "")
-        self._potencia_kva.setValue(valores.get("potencia_kva") or 0)
-        self._potencia_kw.setValue(valores.get("potencia_kw") or 0)
+        self._potencia_kva.set_valor(valores.get("potencia_kva"))
+        self._potencia_kw.set_valor(valores.get("potencia_kw"))
         self._voltaje.setCurrentText(valores.get("voltaje") or "")
         self._seleccionar(self._fases, valores.get("fases"))
         self._seleccionar(self._combustible, valores.get("tipo_combustible"))
-        self._capacidad_tanque.setValue(valores.get("capacidad_tanque_gal") or 0)
+        self._capacidad_tanque.set_valor(valores.get("capacidad_tanque_gal"))
 
         fecha: date | None = valores.get("fecha_adquisicion")
         self._fecha_conocida.setChecked(fecha is not None)
         if fecha is not None:
             self._fecha.setDate(QDate(fecha.year, fecha.month, fecha.day))
 
-        valor = valores.get("valor_compra")
-        self._valor_compra.setText(f"{valor:,}".replace(",", ".") if valor is not None else "")
-        self._horometro.setValue(valores.get("horometro_inicial") or 0)
+        self._valor_compra.set_valor(valores.get("valor_compra"))
+        self._horometro.set_valor(valores.get("horometro_inicial"))
         self._observaciones.setPlainText(valores.get("observaciones") or "")
+        for nombre, campo in self._filtros.items():
+            campo.setText(valores.get(nombre) or "")
+        self._cantidad_aceite.set_valor(valores.get("cantidad_aceite_gal"))
+        self._seleccionar(self._tipo_aceite, valores.get("tipo_aceite"))
 
     def marcar_errores(self, errores: dict[str, str]) -> None:
         """Pinta en rojo cada campo con error y muestra su mensaje debajo."""
@@ -371,11 +393,6 @@ class PlantaFormDialog(QDialog):
     # ------------------------------------------------------------------ #
     # Auxiliares
     # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _valor_opcional(spin: QDoubleSpinBox) -> float | None:
-        """El mínimo (que se muestra como "—") significa "sin dato"."""
-        return None if spin.value() == spin.minimum() else spin.value()
 
     @staticmethod
     def _seleccionar(combo: QComboBox, clave: object) -> None:

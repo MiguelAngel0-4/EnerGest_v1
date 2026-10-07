@@ -169,7 +169,7 @@ class PlantasTableModel(QAbstractTableModel):
             Columna.MODELO: datos.modelo or SIN_VALOR,
             Columna.POTENCIA: formatear_decimal(datos.potencia_kva, "kVA"),
             Columna.SERIAL: datos.numero_serie or SIN_VALOR,
-            Columna.HOROMETRO: formatear_entero(datos.horometro_inicial, "h"),
+            Columna.HOROMETRO: formatear_entero(planta.horometro_actual, "h"),  # Última lectura
             Columna.ESTADO: planta.estado.etiqueta,
             Columna.ACCIONES: "",
         }
@@ -186,7 +186,7 @@ class PlantasTableModel(QAbstractTableModel):
             Columna.MODELO: (datos.modelo or "").casefold(),
             Columna.POTENCIA: datos.potencia_kva,
             Columna.SERIAL: (datos.numero_serie or "").casefold(),
-            Columna.HOROMETRO: datos.horometro_inicial,
+            Columna.HOROMETRO: planta.horometro_actual,
             Columna.ESTADO: planta.estado.etiqueta,
             Columna.ACCIONES: 0,
         }
@@ -247,7 +247,8 @@ class PlantasFilterProxy(QSortFilterProxyModel):
 
         if self._estados is not None and modelo.data(indice, ESTADO_ROLE) not in self._estados:
             return False
-        if self._marca is not None and str(modelo.data(indice, MARCA_ROLE)).casefold() != self._marca:
+        marca = str(modelo.data(indice, MARCA_ROLE)).casefold()
+        if self._marca is not None and marca != self._marca:
             return False
         if self._rango is not None:
             minimo, maximo = self._rango

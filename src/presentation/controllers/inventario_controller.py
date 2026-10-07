@@ -22,12 +22,16 @@ from PySide6.QtWidgets import QDialog
 
 from src.business.exceptions import NegocioError, ValidacionError
 from src.business.models.estado_planta import EstadoPlanta
-from src.business.models.planta import Planta, TipoCombustible
+from src.business.models.planta import Planta, TipoAceite, TipoCombustible
 from src.business.services.planta_service import PlantaService
 from src.presentation.controllers.planta_form_mapper import datos_a_valores, valores_a_datos
 from src.presentation.dialogs.cambiar_estado_dialog import CambiarEstadoDialog, OpcionEstado
 from src.presentation.dialogs.historial_planta_dialog import HistorialPlantaDialog
-from src.presentation.dialogs.planta_form_dialog import PlantaFormDialog
+from src.presentation.dialogs.planta_form_dialog import (
+    CAMPOS_FILTROS,
+    OpcionesFormulario,
+    PlantaFormDialog,
+)
 from src.presentation.table_models.plantas_table_model import (
     ID_ROLE,
     RANGOS_POTENCIA,
@@ -37,7 +41,7 @@ from src.presentation.table_models.plantas_table_model import (
 )
 from src.presentation.views.equipos.inventario_view import InventarioView
 from src.presentation.widgets.acciones_delegate import AccionesDelegate
-from src.shared.formatters import formatear_consecutivo
+from src.shared.formatters import formatear_consecutivo, formatear_entero
 
 logger = logging.getLogger(__name__)
 
@@ -201,16 +205,27 @@ class InventarioController(QObject):
                     etiqueta=destino.etiqueta,
                     requiere_motivo=destino.requiere_motivo,
                     aviso=self._aviso_transicion(planta, destino),
+                    # Obligatoria al salir en alquiler; opcional al regresar de él
+                    # (con ambas lecturas se conocen las horas de uso del alquiler).
+                    pide_horometro=(
+                        destino.requiere_horometro or planta.estado is EstadoPlanta.ALQUILADA
+                    ),
+                    horometro_obligatorio=destino.requiere_horometro,
                 )
                 for destino in EstadoPlanta  # Recorre en el orden del Enum
                 if planta.estado.puede_pasar_a(destino)
             ]
             dialogo = CambiarEstadoDialog(
-                self._describir(planta), planta.estado.etiqueta, opciones, fecha_minima, self._vista
+                self._describir(planta),
+                planta.estado.etiqueta,
+                opciones,
+                fecha_minima,
+                formatear_entero(planta.horometro_actual, "h"),
+                self._vista,
             )
             dialogo.cambio_solicitado.connect(
-                lambda clave, motivo, fecha: self._aplicar_cambio_estado(
-                    dialogo, planta, clave, motivo, fecha
+                lambda clave, motivo, fecha, horometro: self._aplicar_cambio_estado(
+                    dialogo, planta, clave, motivo, fecha, horometro
                 )
             )
             if self._ejecutar(dialogo) and self._resultado is not None:
@@ -230,6 +245,7 @@ class InventarioController(QObject):
                     c.fecha.strftime(_FORMATO_FECHA),
                     c.estado_anterior.etiqueta if c.estado_anterior else "— (registro)",
                     c.estado_nuevo.etiqueta,
+                    formatear_entero(c.horometro, "h") if c.horometro is not None else "",
                     c.motivo or "",
                 )
                 for c in cambios
@@ -238,7 +254,11 @@ class InventarioController(QObject):
                 (
                     formatear_consecutivo(r.numero),
                     r.fecha_asignacion.strftime(_FORMATO_FECHA),
-                    r.fecha_liberacion.strftime(_FORMATO_FECHA) if r.fecha_liberacion else "Vigente",
+                    (
+                        r.fecha_liberacion.strftime(_FORMATO_FECHA)
+                        if r.fecha_liberacion
+                        else "Vigente"
+                    ),
                     r.motivo_liberacion or "",
                 )
                 for r in consecutivos
@@ -283,22 +303,29 @@ class InventarioController(QObject):
         self, titulo: str, texto_consecutivo: str, texto_estado: str
     ) -> PlantaFormDialog:
         """Crea el formulario con las opciones de los combos."""
-        marcas = sorted(
-            {p.datos.marca for p in self._servicio.listar(incluir_fuera_de_operacion=True)},
-            key=str.casefold,
-        )
+        todas = self._servicio.listar(incluir_fuera_de_operacion=True)  # Una sola consulta
+        marcas = sorted({p.datos.marca for p in todas}, key=str.casefold)
         combustibles: list[tuple[str, str | None]] = [("—", None)]
         combustibles += [(c.etiqueta, c.value) for c in TipoCombustible]
-        return PlantaFormDialog(
-            titulo,
-            texto_consecutivo,
-            texto_estado,
-            marcas,
-            _OPCIONES_FASES,
-            combustibles,
-            _VOLTAJES_SUGERIDOS,
-            self._vista,
+        aceites: list[tuple[str, str | None]] = [("—", None)]
+        aceites += [(a.etiqueta, a.value) for a in TipoAceite]
+        # Referencias de filtros ya usadas: se sugieren para escribirlas igual siempre.
+        sugerencias = {
+            campo: sorted(
+                {getattr(p.datos, campo) for p in todas if getattr(p.datos, campo)},
+                key=str.casefold,
+            )
+            for campo in CAMPOS_FILTROS
+        }
+        opciones = OpcionesFormulario(
+            marcas=marcas,
+            opciones_fases=_OPCIONES_FASES,
+            opciones_combustible=combustibles,
+            opciones_aceite=aceites,
+            voltajes=_VOLTAJES_SUGERIDOS,
+            sugerencias_filtros=sugerencias,
         )
+        return PlantaFormDialog(titulo, texto_consecutivo, texto_estado, opciones, self._vista)
 
     def _guardar(
         self, dialogo: PlantaFormDialog, valores: dict[str, Any], planta_id: int | None
@@ -331,6 +358,7 @@ class InventarioController(QObject):
         clave: str,
         motivo: str,
         fecha: date,
+        horometro: int | None,
     ) -> None:
         """Respuesta al botón Actualizar estado."""
         nuevo = EstadoPlanta(clave)
@@ -349,7 +377,9 @@ class InventarioController(QObject):
         ):
             return
         try:
-            self._resultado = self._servicio.cambiar_estado(planta.id, nuevo, motivo, fecha)
+            self._resultado = self._servicio.cambiar_estado(
+                planta.id, nuevo, motivo, fecha, horometro
+            )
         except ValidacionError as exc:
             dialogo.mostrar_errores(exc.errores)
             return
@@ -413,6 +443,12 @@ class InventarioController(QObject):
         elif antes.numero_consecutivo is None and despues.numero_consecutivo is not None:
             texto += (
                 f"\nRecibió el número {formatear_consecutivo(despues.numero_consecutivo)}."
+            )
+        if despues.horometro_actual != antes.horometro_actual:
+            usadas = despues.horometro_actual - antes.horometro_actual
+            texto += (
+                f"\nLectura del horómetro: {formatear_entero(despues.horometro_actual, 'h')}"
+                f" (+{formatear_entero(usadas, 'h')} desde la lectura anterior)."
             )
         return texto
 
