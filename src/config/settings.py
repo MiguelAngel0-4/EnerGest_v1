@@ -13,7 +13,7 @@ from typing import Final
 # --- Identidad de la aplicación -------------------------------------------
 APP_NAME: Final[str] = "Gestión de Plantas Eléctricas"
 APP_SLUG: Final[str] = "GestionPlantas"  # Nombre sin espacios, usado en carpetas
-APP_VERSION: Final[str] = "0.2.0"
+APP_VERSION: Final[str] = "0.3.0"
 
 # --- Base de datos ----------------------------------------------------------
 DB_FILENAME: Final[str] = "gestion_plantas.db"
