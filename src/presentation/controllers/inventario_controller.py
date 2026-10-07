@@ -49,14 +49,8 @@ logger = logging.getLogger(__name__)
 _EN_OPERACION: Final[str] = "EN_OPERACION"
 _TODOS: Final[str] = "TODOS"
 
-_VOLTAJES_SUGERIDOS: Final[list[str]] = [
-    "120 V",
-    "120/240 V",
-    "208 V",
-    "220 V",
-    "220/440 V",
-    "440 V",
-]
+# Valor que usa la empresa. El campo admite escribir otro si llega un equipo distinto.
+_VOLTAJES_SUGERIDOS: Final[list[str]] = ["110/220 V"]
 _OPCIONES_FASES: Final[list[tuple[str, int | None]]] = [
     ("—", None),
     ("Monofásica (1)", 1),
@@ -177,6 +171,7 @@ class InventarioController(QObject):
                 f"Editar planta {formatear_consecutivo(planta.numero_consecutivo)}",
                 f"{formatear_consecutivo(planta.numero_consecutivo)} (no editable)",
                 f"{planta.estado.etiqueta} (se cambia con el botón Estado)",
+                combustible_actual=planta.datos.tipo_combustible,
             )
             dialogo.cargar_valores(datos_a_valores(planta.datos))
             dialogo.guardar_solicitado.connect(
@@ -300,13 +295,28 @@ class InventarioController(QObject):
     # ------------------------------------------------------------------ #
 
     def _crear_formulario(
-        self, titulo: str, texto_consecutivo: str, texto_estado: str
+        self,
+        titulo: str,
+        texto_consecutivo: str,
+        texto_estado: str,
+        combustible_actual: TipoCombustible | None = None,
     ) -> PlantaFormDialog:
-        """Crea el formulario con las opciones de los combos."""
+        """
+        Crea el formulario con las opciones de los combos.
+
+        Args:
+            combustible_actual: Al editar, el combustible que ya tiene la planta.
+                Si es uno retirado (Gas), se ofrece como "(histórico)" para que
+                el dato no se borre sin querer al guardar.
+        """
         todas = self._servicio.listar(incluir_fuera_de_operacion=True)  # Una sola consulta
         marcas = sorted({p.datos.marca for p in todas}, key=str.casefold)
         combustibles: list[tuple[str, str | None]] = [("—", None)]
-        combustibles += [(c.etiqueta, c.value) for c in TipoCombustible]
+        combustibles += [(c.etiqueta, c.value) for c in TipoCombustible if c.vigente]
+        if combustible_actual is not None and not combustible_actual.vigente:
+            combustibles.append(
+                (f"{combustible_actual.etiqueta} (histórico)", combustible_actual.value)
+            )
         aceites: list[tuple[str, str | None]] = [("—", None)]
         aceites += [(a.etiqueta, a.value) for a in TipoAceite]
         # Referencias de filtros ya usadas: se sugieren para escribirlas igual siempre.

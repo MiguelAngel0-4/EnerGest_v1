@@ -17,7 +17,12 @@ from src.business.models.estado_planta import EstadoPlanta
 
 
 class TipoCombustible(StrEnum):
-    """Tipos de combustible admitidos."""
+    """
+    Tipos de combustible.
+
+    GAS se conserva solo como dato histórico: las plantas registradas antes
+    de retirarlo lo mantienen, pero no puede asignarse a ninguna otra.
+    """
 
     DIESEL = "DIESEL"
     GASOLINA = "GASOLINA"
@@ -27,6 +32,11 @@ class TipoCombustible(StrEnum):
     def etiqueta(self) -> str:
         """Nombre legible para mostrar al usuario."""
         return {"DIESEL": "Diésel", "GASOLINA": "Gasolina", "GAS": "Gas"}[self.value]
+
+    @property
+    def vigente(self) -> bool:
+        """True si puede elegirse al registrar o editar una planta."""
+        return self is not TipoCombustible.GAS
 
 
 class TipoAceite(StrEnum):

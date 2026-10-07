@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS plantas (
 
     -- Combustible
     tipo_combustible     TEXT    CHECK (tipo_combustible IS NULL
-                                        OR tipo_combustible IN ('DIESEL', 'GASOLINA')),
+                                        OR tipo_combustible IN ('DIESEL', 'GASOLINA', 'GAS')),
     capacidad_tanque_gal REAL    CHECK (capacidad_tanque_gal IS NULL OR capacidad_tanque_gal > 0),
 
     -- Operativo y financiero

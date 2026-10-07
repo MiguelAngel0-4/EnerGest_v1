@@ -128,7 +128,7 @@ class PlantaFormDialog(QDialog):
         self._voltaje.setEditable(True)
         self._voltaje.addItems(opciones.voltajes)
         self._voltaje.setCurrentIndex(-1)
-        self._voltaje.lineEdit().setPlaceholderText("Ej. 120/240 V")
+        self._voltaje.lineEdit().setPlaceholderText("Ej. 110/220 V")
 
         self._fases = self._combo(opciones.opciones_fases)
         self._combustible = self._combo(opciones.opciones_combustible)

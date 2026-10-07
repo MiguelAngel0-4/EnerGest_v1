@@ -19,7 +19,13 @@ from src.business.exceptions import (
 )
 from src.business.interfaces.unidad_de_trabajo import FabricaUnidadDeTrabajo, IUnidadDeTrabajo
 from src.business.models.estado_planta import EstadoPlanta
-from src.business.models.planta import CambioEstado, DatosPlanta, Planta, RegistroConsecutivo
+from src.business.models.planta import (
+    CambioEstado,
+    DatosPlanta,
+    Planta,
+    RegistroConsecutivo,
+    TipoCombustible,
+)
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.validators.planta_validator import normalizar_datos, validar_datos
 
@@ -62,6 +68,8 @@ class PlantaService:
         hoy = self._hoy()
         datos = self._normalizar_y_validar(datos, hoy)
 
+        self._verificar_combustible_vigente(datos, combustible_anterior=None)
+
         with self._uow_factory() as uow:
             self._verificar_serie_unica(uow, datos.numero_serie, excluir_id=None)
 
@@ -95,7 +103,8 @@ class PlantaService:
         datos = self._normalizar_y_validar(datos, self._hoy())
 
         with self._uow_factory() as uow:
-            self._obtener_o_fallar(uow, planta_id)
+            actual = self._obtener_o_fallar(uow, planta_id)
+            self._verificar_combustible_vigente(datos, actual.datos.tipo_combustible)
             self._verificar_serie_unica(uow, datos.numero_serie, excluir_id=planta_id)
             uow.plantas.actualizar_datos(planta_id, datos)
             planta = self._obtener_o_fallar(uow, planta_id)
@@ -276,6 +285,29 @@ class PlantaService:
         if errores:
             raise ValidacionError(errores)
         return datos_limpios
+
+    @staticmethod
+    def _verificar_combustible_vigente(
+        datos: DatosPlanta, combustible_anterior: TipoCombustible | None
+    ) -> None:
+        """
+        Un combustible retirado (Gas) solo se admite si la planta YA lo tenía:
+        se conserva el dato histórico, pero no se asigna a registros nuevos.
+        """
+        combustible = datos.tipo_combustible
+        if (
+            combustible is not None
+            and not combustible.vigente
+            and combustible != combustible_anterior
+        ):
+            raise ValidacionError(
+                {
+                    "tipo_combustible": (
+                        f"El combustible '{combustible.etiqueta}' ya no se admite. "
+                        "Elija Diésel o Gasolina."
+                    )
+                }
+            )
 
     @staticmethod
     def _verificar_serie_unica(
