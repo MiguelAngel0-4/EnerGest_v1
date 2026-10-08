@@ -1,5 +1,37 @@
 # Registro de cambios – EnerGest
 
+## [0.5.0] – 2026-10-09
+
+### Agregado
+
+- Ficha de la planta: ventana con pestañas que reúne su información. Se abre
+  con el botón "Ficha" del inventario.
+- Pestaña "Gastos" en la ficha: registro de gastos por planta con categoría,
+  fecha, descripción, cantidad, unidad y valor, más un resumen de totales por
+  categoría y del valor sin soporte.
+- Facturas de proveedor que pueden repartirse entre varias plantas, con el saldo
+  por asignar siempre visible. Un gasto nunca puede superar ese saldo.
+- Registro de proveedores y facturas desde el mismo formulario del gasto.
+- Gastos sin factura para compras informales, identificados como "Sin soporte".
+- Anulación de gastos con motivo obligatorio: el gasto anulado no se borra,
+  queda tachado y se puede consultar con "Mostrar anulados".
+- Sugerencias de descripción tomadas de la ficha técnica de la planta
+  (referencias de filtros y tipo de aceite).
+
+### Cambiado
+
+- El botón "Historial" del inventario se reemplaza por "Ficha"; el historial de
+  estados y de números consecutivos ahora es una pestaña dentro de la ficha.
+- Las pestañas que se habilitarán en próximas versiones (Mantenimientos,
+  Ingresos y Balance) se muestran atenuadas.
+
+### Reglas de negocio
+
+- No se registran gastos a plantas vendidas o dadas de baja; las retiradas sí
+  los admiten.
+- Un proveedor no puede repetir un número de factura, y no pueden existir dos
+  proveedores con el mismo nombre o NIT.
+
 ## [0.4.0] – 2026-10-08
 
 ### Agregado
