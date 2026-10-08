@@ -28,10 +28,16 @@ from src.infrastructure.database.exceptions import (
 from src.infrastructure.repositories.sqlite_consecutivo_repository import (
     SqliteConsecutivoRepository,
 )
+from src.infrastructure.repositories.sqlite_factura_repository import SqliteFacturaRepository
+from src.infrastructure.repositories.sqlite_gasto_repository import SqliteGastoRepository
 from src.infrastructure.repositories.sqlite_historial_estado_repository import (
     SqliteHistorialEstadoRepository,
 )
 from src.infrastructure.repositories.sqlite_planta_repository import SqlitePlantaRepository
+from src.infrastructure.repositories.sqlite_proveedor_repository import (
+    SqliteCategoriaRepository,
+    SqliteProveedorRepository,
+)
 
 
 class SqliteUnidadDeTrabajo:
@@ -40,6 +46,10 @@ class SqliteUnidadDeTrabajo:
     plantas: SqlitePlantaRepository
     consecutivos: SqliteConsecutivoRepository
     historial_estados: SqliteHistorialEstadoRepository
+    gastos: SqliteGastoRepository
+    facturas: SqliteFacturaRepository
+    proveedores: SqliteProveedorRepository
+    categorias: SqliteCategoriaRepository
 
     def __init__(self, db: DatabaseManager) -> None:
         self._db = db
@@ -57,6 +67,10 @@ class SqliteUnidadDeTrabajo:
         self.plantas = SqlitePlantaRepository(conn)
         self.consecutivos = SqliteConsecutivoRepository(conn)
         self.historial_estados = SqliteHistorialEstadoRepository(conn)
+        self.gastos = SqliteGastoRepository(conn)
+        self.facturas = SqliteFacturaRepository(conn)
+        self.proveedores = SqliteProveedorRepository(conn)
+        self.categorias = SqliteCategoriaRepository(conn)
         return self
 
     def __exit__(
