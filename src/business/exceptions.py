@@ -55,3 +55,12 @@ class PersistenciaError(NegocioError):
     La lanzan los repositorios al traducir errores de la base de datos,
     para que el negocio nunca dependa de excepciones de SQLite.
     """
+
+
+class DocumentoError(NegocioError):
+    """
+    No se pudo crear un documento (hoja de vida, reporte).
+
+    La lanza el generador de la infraestructura al traducir errores del
+    sistema de archivos, para que la interfaz muestre un mensaje claro.
+    """
