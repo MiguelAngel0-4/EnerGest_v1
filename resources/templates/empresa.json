@@ -1,0 +1,8 @@
+{
+  "_instrucciones": "Datos de la empresa para el encabezado de los documentos. Para el logo, copie la imagen (PNG o JPG) en esta misma carpeta con el nombre indicado en 'logo'. Cierre EnerGest antes de editar este archivo y conserve las comillas y comas.",
+  "nombre": "WG ENERGIA INTEGRAL SAS",
+  "nit": "901.762.018-1",
+  "telefono": "3187354882",
+  "direccion": "Cra 12 # 30A - 37 Cali, Valle del Cauca",
+  "logo": "logo_empresa.png"
+}

@@ -21,7 +21,7 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtGui import QMouseEvent, QPainter
+from PySide6.QtGui import QFontMetrics, QMouseEvent, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QStyle,
@@ -31,7 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 _MARGEN: Final[int] = 4
-_ANCHO_BOTON: Final[int] = 66
+_RELLENO_TEXTO: Final[int] = 18  # Espacio a los lados del texto dentro del botón
+_ANCHO_MINIMO: Final[int] = 44
 
 
 class AccionesDelegate(QStyledItemDelegate):
@@ -53,6 +54,12 @@ class AccionesDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self._acciones = acciones
         self._id_role = id_role
+        # Cada botón mide lo que necesita su texto: "PDF" es más corto que "Historial".
+        metricas = QFontMetrics(QApplication.font())
+        self._anchos = [
+            max(metricas.horizontalAdvance(texto) + _RELLENO_TEXTO, _ANCHO_MINIMO)
+            for _clave, texto in acciones
+        ]
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         # Primero el fondo normal de la celda (respeta selección y filas alternas).
@@ -88,7 +95,7 @@ class AccionesDelegate(QStyledItemDelegate):
 
     def ancho_requerido(self) -> int:
         """Ancho en píxeles que necesita la columna para mostrar todos los botones."""
-        return len(self._acciones) * (_ANCHO_BOTON + _MARGEN) + _MARGEN
+        return sum(self._anchos) + _MARGEN * (len(self._anchos) + 1)
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
         return QSize(self.ancho_requerido(), 32)
@@ -97,7 +104,9 @@ class AccionesDelegate(QStyledItemDelegate):
         """Calcula la posición de cada botón dentro de la celda."""
         alto = max(area.height() - 2 * _MARGEN, 18)
         y = area.top() + (area.height() - alto) // 2
-        return [
-            QRect(area.left() + _MARGEN + i * (_ANCHO_BOTON + _MARGEN), y, _ANCHO_BOTON, alto)
-            for i in range(len(self._acciones))
-        ]
+        rectangulos: list[QRect] = []
+        x = area.left() + _MARGEN
+        for ancho in self._anchos:
+            rectangulos.append(QRect(x, y, ancho, alto))
+            x += ancho + _MARGEN
+        return rectangulos

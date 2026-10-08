@@ -16,20 +16,29 @@ import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.business.services.consecutivo_service import ConsecutivoService
+from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.planta_service import PlantaService
 from src.config import settings
 from src.config.logging_config import setup_logging
 from src.infrastructure.database.connection import DatabaseManager
 from src.infrastructure.database.exceptions import DatabaseError
+from src.infrastructure.reports.pdf_hoja_vida import GeneradorPdfHojaVida
+from src.infrastructure.repositories.empresa_json_repository import EmpresaJsonRepository
 from src.infrastructure.repositories.sqlite_unidad_de_trabajo import crear_fabrica_uow
 from src.presentation.controllers.inventario_controller import InventarioController
 from src.presentation.views.equipos.inventario_view import InventarioView
 from src.presentation.views.main_window import MainWindow
-from src.shared.paths import get_database_path, get_resource_path, is_using_fallback_location
+from src.shared.paths import (
+    get_data_dir,
+    get_database_path,
+    get_resource_path,
+    is_using_fallback_location,
+)
 
 logger = logging.getLogger(__name__)
 
 _RUTA_ESTILOS = "resources/styles/theme.qss"
+_PLANTILLA_EMPRESA = "resources/templates/empresa.json"
 
 
 def _aplicar_estilos(app: QApplication) -> None:
@@ -39,7 +48,7 @@ def _aplicar_estilos(app: QApplication) -> None:
     try:
         app.setStyleSheet(ruta.read_text(encoding="utf-8"))
     except OSError:
-        logger.warning("No se encontró la hoja de estilos en %s; se usan estilos por defecto.", ruta)
+        logger.warning("No se encontró la hoja de estilos en %s; se usan los de Qt.", ruta)
 
 
 def _preparar_base_de_datos() -> DatabaseManager:
@@ -75,13 +84,23 @@ def main() -> int:
         return 1
 
     # --- Capa de negocio -------------------------------------------------
-    servicio_plantas = PlantaService(crear_fabrica_uow(db), ConsecutivoService())
+    fabrica_uow = crear_fabrica_uow(db)
+    servicio_plantas = PlantaService(fabrica_uow, ConsecutivoService())
+    empresa = EmpresaJsonRepository(
+        get_data_dir() / "empresa.json", get_resource_path(_PLANTILLA_EMPRESA)
+    )
+    logger.info("Datos de la empresa: %s", empresa.ruta)
+    servicio_hojas_vida = HojaVidaService(
+        fabrica_uow, GeneradorPdfHojaVida(), empresa.obtener, settings.APP_VERSION
+    )
 
     # --- Capa de presentación --------------------------------------------
     ventana = MainWindow(settings.APP_NAME, settings.APP_VERSION)
     vista_inventario = InventarioView()
     ventana.agregar_vista("inventario", vista_inventario)
-    controlador_inventario = InventarioController(servicio_plantas, vista_inventario, ventana)
+    controlador_inventario = InventarioController(
+        servicio_plantas, servicio_hojas_vida, vista_inventario, ventana
+    )
 
     ventana.registro_solicitado.connect(controlador_inventario.abrir_registro)
     ventana.set_mensaje_estado(f"Base de datos: {db.db_path}")
