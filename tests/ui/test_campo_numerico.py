@@ -48,3 +48,10 @@ def test_set_valor_muestra_formato_colombiano(qapp: QApplication) -> None:
     assert campo.text() == "2,5"
     campo.set_valor(None)
     assert campo.text() == ""
+
+
+def test_el_simulador_de_teclado_rechaza_tildes_con_un_mensaje_claro(qapp: QApplication) -> None:
+    """QTest no sabe teclear "é": sin esta guarda, Qt abortaría todo el proceso de pruebas."""
+    campo = CampoNumerico()
+    with pytest.raises(ValueError, match="solo admite texto ASCII"):
+        escribir_como_usuario(campo, "Pérez")

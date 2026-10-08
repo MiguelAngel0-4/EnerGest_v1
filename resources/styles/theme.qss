@@ -274,3 +274,33 @@ QTabBar::tab:disabled {
 QDialog QRadioButton, QDialog QCheckBox {
     background-color: transparent;
 }
+
+/* Indicadores explícitos. Al quitarles el fondo a los botones de opción y las
+   casillas (regla anterior), Qt los dibuja con el motor de hojas de estilo, que
+   no pinta círculos ni recuadros si no se le indica cómo. */
+QRadioButton::indicator, QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    background-color: #FFFFFF;
+    border: 1px solid #8A939B;
+}
+QRadioButton::indicator {
+    border-radius: 8px;
+}
+QRadioButton::indicator:checked {
+    /* Punto azul dentro de un anillo azul, sin cambiar el tamaño del círculo */
+    border: 1px solid #2E75B6;
+    background-color: qradialgradient(cx: 0.5, cy: 0.5, radius: 0.5, fx: 0.5, fy: 0.5,
+        stop: 0 #2E75B6, stop: 0.5 #2E75B6, stop: 0.6 #FFFFFF, stop: 1 #FFFFFF);
+}
+QCheckBox::indicator {
+    border-radius: 3px;
+}
+QCheckBox::indicator:checked {
+    background-color: #2E75B6;
+    border: 1px solid #2E75B6;
+}
+QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {
+    background-color: #F1F3F5;
+    border-color: #C4CDD5;
+}

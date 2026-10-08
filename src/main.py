@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.services.gasto_service import GastoService
 from src.business.services.hoja_vida_service import HojaVidaService
+from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
 from src.config import settings
 from src.config.logging_config import setup_logging
@@ -96,13 +97,24 @@ def main() -> int:
         fabrica_uow, GeneradorPdfHojaVida(), empresa.obtener, settings.APP_VERSION
     )
     servicio_gastos = GastoService(fabrica_uow)
+    servicio_mantenimientos = MantenimientoService(
+        fabrica_uow,
+        dias_alerta=settings.ALERTA_DIAS_ANTICIPACION,
+        horas_alerta=settings.ALERTA_HORAS_ANTICIPACION,
+    )
 
     # --- Capa de presentación --------------------------------------------
     ventana = MainWindow(settings.APP_NAME, settings.APP_VERSION)
     vista_inventario = InventarioView()
     ventana.agregar_vista("inventario", vista_inventario)
     controlador_ficha = FichaPlantaController(
-        servicio_plantas, servicio_gastos, vista_inventario, ventana
+        servicio_plantas,
+        servicio_gastos,
+        servicio_mantenimientos,
+        vista_inventario,
+        ventana,
+        intervalo_meses=settings.MANTENIMIENTO_INTERVALO_MESES,
+        intervalo_horas=settings.MANTENIMIENTO_INTERVALO_HORAS,
     )
     controlador_inventario = InventarioController(
         servicio_plantas,
@@ -110,6 +122,7 @@ def main() -> int:
         vista_inventario,
         ventana,
         ficha=controlador_ficha,
+        mantenimientos=servicio_mantenimientos,
     )
 
     ventana.registro_solicitado.connect(controlador_inventario.abrir_registro)

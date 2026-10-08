@@ -10,6 +10,7 @@ from typing import Final
 from src.business.models.gasto import DatosGasto, Gasto, GastoDetalle, ResumenGastos
 from src.infrastructure.repositories.conversiones import (
     fecha_a_texto,
+    texto_a_fecha,
     texto_a_fecha_hora,
     texto_a_fecha_obligatoria,
 )
@@ -17,11 +18,13 @@ from src.infrastructure.repositories.conversiones import (
 # Gasto + nombres de categoría, factura y proveedor en UNA consulta (evita
 # consultar uno por uno, el clásico problema "N+1").
 _SQL_DETALLE: Final[str] = """
-    SELECT g.*, c.nombre AS categoria, f.numero_factura, p.nombre AS proveedor
+    SELECT g.*, c.nombre AS categoria, f.numero_factura, p.nombre AS proveedor,
+           m.fecha AS mantenimiento_fecha
     FROM gastos g
     JOIN categorias_gasto c ON c.id = g.categoria_id
     LEFT JOIN facturas_proveedor f ON f.id = g.factura_id
     LEFT JOIN proveedores p ON p.id = f.proveedor_id
+    LEFT JOIN mantenimientos m ON m.id = g.mantenimiento_id
 """
 
 
@@ -61,6 +64,13 @@ class SqliteGastoRepository:
             (motivo, gasto_id),
         )
 
+    def anular_por_mantenimiento(self, mantenimiento_id: int, motivo: str) -> None:
+        self._conn.execute(
+            "UPDATE gastos SET anulado = 1, motivo_anulacion = ? "
+            "WHERE mantenimiento_id = ? AND anulado = 0",
+            (motivo, mantenimiento_id),
+        )
+
     def listar_por_planta(
         self, planta_id: int, incluir_anulados: bool = False
     ) -> list[GastoDetalle]:
@@ -74,6 +84,7 @@ class SqliteGastoRepository:
                 categoria=fila["categoria"],
                 numero_factura=fila["numero_factura"],
                 proveedor=fila["proveedor"],
+                mantenimiento_fecha=texto_a_fecha(fila["mantenimiento_fecha"]),
             )
             for fila in self._conn.execute(sql, (planta_id,)).fetchall()
         ]

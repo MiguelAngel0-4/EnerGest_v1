@@ -61,6 +61,9 @@ class HojaVidaService:
                 raise PlantaNoEncontradaError(planta_id)
             cambios = uow.historial_estados.listar_por_planta(planta_id)
             consecutivos = uow.consecutivos.historial_de_planta(planta_id)
+            # El repositorio los entrega del más reciente al más antiguo; el documento
+            # los muestra en orden cronológico, como los demás historiales.
+            mantenimientos = list(reversed(uow.mantenimientos.listar_por_planta(planta_id)))
 
         return HojaDeVida(
             planta=planta,
@@ -69,6 +72,7 @@ class HojaVidaService:
             empresa=self._empresa(),
             generado_en=self._ahora(),
             version_app=self._version_app,
+            mantenimientos=tuple(mantenimientos),
         )
 
     def exportar(self, planta_id: int, destino: Path) -> Path:

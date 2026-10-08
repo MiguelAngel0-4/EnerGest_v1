@@ -22,6 +22,7 @@ from src.business.interfaces.gasto_repository import (
     IGastoRepository,
     IProveedorRepository,
 )
+from src.business.interfaces.mantenimiento_repository import IMantenimientoRepository
 from src.business.interfaces.planta_repository import (
     IConsecutivoRepository,
     IHistorialEstadoRepository,
@@ -40,6 +41,8 @@ class IUnidadDeTrabajo(Protocol):
     facturas: IFacturaRepository
     proveedores: IProveedorRepository
     categorias: ICategoriaRepository
+    # Módulo de mantenimientos (Actividad 4.2)
+    mantenimientos: IMantenimientoRepository
 
     def __enter__(self) -> Self:
         """Inicia la transacción."""

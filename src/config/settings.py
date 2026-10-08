@@ -13,7 +13,7 @@ from typing import Final
 # --- Identidad de la aplicación -------------------------------------------
 APP_NAME: Final[str] = "Gestión de Plantas Eléctricas"
 APP_SLUG: Final[str] = "GestionPlantas"  # Nombre sin espacios, usado en carpetas
-APP_VERSION: Final[str] = "0.4.0"
+APP_VERSION: Final[str] = "0.6.0"
 
 # --- Base de datos ----------------------------------------------------------
 DB_FILENAME: Final[str] = "gestion_plantas.db"
@@ -23,7 +23,7 @@ DB_TIMEOUT_SECONDS: Final[float] = 10.0
 
 # Versión del esquema. Se guarda en PRAGMA user_version y permitirá
 # aplicar migraciones ordenadas en futuras versiones.
-SCHEMA_VERSION: Final[int] = 2
+SCHEMA_VERSION: Final[int] = 3
 
 # Ruta del script SQL relativa a la raíz del proyecto (o del .exe).
 SCHEMA_RELATIVE_PATH: Final[str] = "src/infrastructure/database/schema.sql"
@@ -37,3 +37,11 @@ LOG_BACKUP_COUNT: Final[int] = 5  # Se conservan app.log.1 ... app.log.5
 # En la BD se guarda solo el entero; el formato visible se arma en la UI.
 CONSECUTIVO_PREFIJO: Final[str] = "PE-"
 CONSECUTIVO_DIGITOS: Final[int] = 3  # 7 -> "PE-007"
+
+# --- Mantenimientos --------------------------------------------------------
+# Intervalo sugerido para el próximo mantenimiento preventivo (editable en el formulario).
+MANTENIMIENTO_INTERVALO_HORAS: Final[int] = 250
+MANTENIMIENTO_INTERVALO_MESES: Final[int] = 6
+# Anticipación con la que un mantenimiento programado se muestra como "Próximo".
+ALERTA_DIAS_ANTICIPACION: Final[int] = 15
+ALERTA_HORAS_ANTICIPACION: Final[int] = 25

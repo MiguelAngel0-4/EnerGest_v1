@@ -7,11 +7,10 @@ Vistas pasivas sobre FormularioBase: leen y muestran valores; las reglas de
 negocio las aplica GastoService y los errores llegan por marcar_errores().
 """
 
-from typing import Any, NamedTuple
+from typing import Any
 
 from PySide6.QtCore import QDate, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QComboBox,
     QDateEdit,
     QFormLayout,
@@ -19,12 +18,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QRadioButton,
     QWidget,
 )
 
 from src.presentation.widgets.campo_numerico import CampoNumerico
 from src.presentation.widgets.formulario_base import FormularioBase
+from src.presentation.widgets.selector_factura import OpcionFactura, SelectorFactura
+
+__all__ = ["NuevaFacturaDialog", "NuevoProveedorDialog", "OpcionFactura", "RegistrarGastoDialog"]
 
 
 def _selector_fecha() -> QDateEdit:
@@ -34,14 +35,6 @@ def _selector_fecha() -> QDateEdit:
     fecha.setMaximumDate(QDate.currentDate())
     fecha.setDate(QDate.currentDate())
     return fecha
-
-
-class OpcionFactura(NamedTuple):
-    """Factura con saldo, tal como se ofrece en la lista."""
-
-    id: int
-    texto: str  # Ej. "FE-0042 · Filtros del Valle"
-    saldo: str  # Ej. "$ 120.000"
 
 
 class RegistrarGastoDialog(FormularioBase):
@@ -65,7 +58,6 @@ class RegistrarGastoDialog(FormularioBase):
         """
         super().__init__("Registrar gasto", parent)
         self._sugerencias = sugerencias
-        self._saldos: dict[int, str] = {}
 
         self._fecha = _selector_fecha()
         self._categoria = QComboBox()
@@ -94,31 +86,7 @@ class RegistrarGastoDialog(FormularioBase):
         self._valor = CampoNumerico(decimales=0, max_digitos=15, placeholder="Ej. 45.000")
 
         # Soporte: con factura (lo habitual en la empresa) o sin ella.
-        self._con_factura = QRadioButton("Con factura")
-        self._sin_factura = QRadioButton("Sin factura (compra informal)")
-        self._con_factura.setChecked(True)
-        grupo = QButtonGroup(self)
-        grupo.addButton(self._con_factura)
-        grupo.addButton(self._sin_factura)
-        fila_soporte = QWidget()
-        fila_soporte.setObjectName("envolturaCampo")
-        layout_soporte = QHBoxLayout(fila_soporte)
-        layout_soporte.setContentsMargins(0, 0, 0, 0)
-        layout_soporte.addWidget(self._con_factura)
-        layout_soporte.addWidget(self._sin_factura)
-        layout_soporte.addStretch()
-
-        self._factura = QComboBox()
-        self._factura.setMinimumWidth(300)
-        self._boton_nueva_factura = QPushButton("Nueva factura…")
-        self._saldo = QLabel()
-        self._saldo.setObjectName("textoSecundario")
-        fila_factura = QWidget()
-        fila_factura.setObjectName("envolturaCampo")
-        layout_factura = QHBoxLayout(fila_factura)
-        layout_factura.setContentsMargins(0, 0, 0, 0)
-        layout_factura.addWidget(self._factura, stretch=1)
-        layout_factura.addWidget(self._boton_nueva_factura)
+        self._soporte = SelectorFactura()
 
         formulario = QFormLayout()
         formulario.addRow("Planta", QLabel(f"<b>{descripcion_planta}</b>"))
@@ -129,34 +97,18 @@ class RegistrarGastoDialog(FormularioBase):
             "Cantidad y unidad", self._campo("cantidad", fila_cantidad, self._cantidad)
         )
         formulario.addRow("Valor total ($) *", self._campo("valor_total", self._valor))
-        formulario.addRow("Soporte", fila_soporte)
-        formulario.addRow("Factura", self._campo("factura_id", fila_factura, self._factura))
-        formulario.addRow("", self._saldo)
+        formulario.addRow("Soporte", self._campo("factura_id", self._soporte, self._soporte.combo))
         self._armar("Registrar gasto", formulario)
 
         self._categoria.currentIndexChanged.connect(self._actualizar_sugerencias)
-        self._factura.currentIndexChanged.connect(self._actualizar_saldo)
-        self._con_factura.toggled.connect(self._al_cambiar_soporte)
-        self._boton_nueva_factura.clicked.connect(self.nueva_factura_solicitada)
+        self._soporte.nueva_factura_solicitada.connect(self.nueva_factura_solicitada)
         self._actualizar_sugerencias()
-        self.set_facturas([])
 
     # --- API pública ------------------------------------------------------
 
     def set_facturas(self, facturas: list[OpcionFactura], seleccionar: int | None = None) -> None:
         """Llena la lista de facturas con saldo; opcionalmente deja una seleccionada."""
-        self._factura.blockSignals(True)
-        self._factura.clear()
-        self._factura.addItem("Seleccione una factura…", None)
-        self._saldos = {}
-        for opcion in facturas:
-            # El saldo se muestra debajo de la lista, no en ella: así el texto no se corta.
-            self._factura.addItem(opcion.texto, opcion.id)
-            self._saldos[opcion.id] = opcion.saldo
-        indice = self._factura.findData(seleccionar) if seleccionar is not None else 0
-        self._factura.setCurrentIndex(max(indice, 0))
-        self._factura.blockSignals(False)
-        self._actualizar_saldo()
+        self._soporte.set_facturas(facturas, seleccionar)
 
     def valores(self) -> dict[str, Any]:
         return {
@@ -166,13 +118,13 @@ class RegistrarGastoDialog(FormularioBase):
             "cantidad": self._cantidad.valor() or 0.0,
             "unidad": self._unidad.currentText(),
             "valor_total": self._valor.valor_entero() or 0,
-            "factura_id": self._factura.currentData() if self._con_factura.isChecked() else None,
+            "factura_id": self._soporte.factura_id(),
         }
 
     # --- Internos ---------------------------------------------------------
 
     def _validar_formulario(self) -> dict[str, str]:
-        if self._con_factura.isChecked() and self._factura.currentData() is None:
+        if self._soporte.falta_seleccion():
             return {"factura_id": "Seleccione una factura, cree una nueva o marque “Sin factura”."}
         return {}
 
@@ -183,17 +135,6 @@ class RegistrarGastoDialog(FormularioBase):
         self._descripcion.addItems(self._sugerencias.get(self._categoria.currentData(), []))
         self._descripcion.setCurrentText(texto_actual)  # No borra lo que ya se escribió
         self._descripcion.blockSignals(False)
-
-    def _actualizar_saldo(self) -> None:
-        factura_id = self._factura.currentData()
-        self._saldo.setText(
-            f"Saldo por asignar: {self._saldos[factura_id]}" if factura_id in self._saldos else ""
-        )
-
-    def _al_cambiar_soporte(self, con_factura: bool) -> None:
-        self._factura.setEnabled(con_factura)
-        self._boton_nueva_factura.setEnabled(con_factura)
-        self._saldo.setVisible(con_factura)
 
 
 class NuevaFacturaDialog(FormularioBase):

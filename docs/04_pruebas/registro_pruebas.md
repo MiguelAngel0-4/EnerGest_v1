@@ -116,3 +116,45 @@ se cortaba en la lista y los botones de opción tenían un fondo gris en el diá
 `git rm`, porque su contenido pasó a la pestaña Historial de la ficha. La entrega
 G1 se copió inicialmente en `develop` antes de crear la rama `feature/gastos`;
 se corrigió moviendo los cambios a la rama antes del commit.
+
+## Ciclo 6 — Mantenimientos (Actividad 4.2)
+
+| Campo                | Detalle                                                   |
+| -------------------- | --------------------------------------------------------- |
+| Fecha                | 2026-10-10                                                |
+| Versión              | 0.6.0 (esquema de base de datos versión 3, migración 003) |
+| Responsable          | [Tu nombre]                                               |
+| Tipo de prueba       | Unitarias (110), integración (55) e interfaz (43)         |
+| Casos ejecutados     | 208 (34 nuevos en este ciclo)                             |
+| Aprobados / Fallidos | 208 / 0                                                   |
+| Evidencia            | 2026-10-10_v0.6.0_mantenimientos.html                     |
+
+**Pruebas nuevas por regla de negocio:**
+
+| Regla                                                                  | Prueba que la verifica                                                                                   |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Sin mantenimientos a plantas vendidas o dadas de baja; sí a alquiladas | `test_plantas_vendidas_no_admiten_mantenimientos`, `test_planta_alquilada_admite_mantenimiento_en_sitio` |
+| Horómetro obligatorio, que nunca retrocede y actualiza la planta       | `test_horometro_no_puede_retroceder`, `test_el_horometro_del_mantenimiento_actualiza_la_planta`          |
+| Fechas en orden cronológico                                            | `test_fecha_anterior_al_ultimo_mantenimiento_es_rechazada`                                               |
+| Próximo mantenimiento siempre posterior; sugerencia según calendario   | `test_proximo_debe_quedar_despues`, `test_proximo_sugerido_respeta_el_calendario`                        |
+| Insumos como gastos ligados, todo o nada                               | `test_registrar_con_insumos_crea_gastos_ligados`, `test_insumos_que_superan_la_factura_no_guardan_nada`  |
+| Anulación en cascada (gastos y lectura)                                | `test_anular_anula_sus_gastos_y_su_lectura`                                                              |
+| Alertas por fecha y por horas                                          | `test_alertas_por_fecha_y_por_horas`, `test_un_alquiler_puede_vencer_un_mantenimiento_por_horas`         |
+| El esquema respalda las reglas                                         | `test_el_esquema_rechaza_un_proximo_menor_que_la_lectura`                                                |
+
+**Migración:** se verificó la migración 003 sobre una base real de la versión
+0.5.0 con gastos y un mantenimiento previo: se creó el respaldo automático, el
+mantenimiento antiguo se conservó y su lectura pasó a contar en el horómetro actual.
+
+**Hallazgos corregidos durante el ciclo:**
+
+| Hallazgo                                                                                                         | Corrección                                                                                             | Prueba de regresión                                                |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Prueba de la versión 0.5.0 que fallaría con el paso de los días (reloj fijo frente al reloj real del formulario) | Los recorridos de interfaz usan el reloj real; se verificó adelantando el reloj 30 días con `faketime` | `test_registrar_y_anular_desde_la_ficha`                           |
+| El orden de las alertas comparaba días con horas                                                                 | Orden fijo: vencidas primero y luego por número de planta                                              | `test_alertas_por_fecha_y_por_horas`                               |
+| Las firmas del PDF quedaban solas en la página 2                                                                 | Las firmas viajan con la última sección                                                                | `test_las_firmas_nunca_quedan_solas_en_una_pagina`                 |
+| El simulador de teclado abortaba con tildes                                                                      | Guarda con mensaje claro                                                                               | `test_el_simulador_de_teclado_rechaza_tildes_con_un_mensaje_claro` |
+
+**Revisión visual:** se corrigieron la altura del formulario de mantenimiento
+(808 px a 697 px), el título recortado del panel de alertas y los indicadores
+de los botones de opción y casillas (sin círculo ni recuadro desde la versión 0.5.0).

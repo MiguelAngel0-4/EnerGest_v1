@@ -33,6 +33,9 @@ from src.infrastructure.repositories.sqlite_gasto_repository import SqliteGastoR
 from src.infrastructure.repositories.sqlite_historial_estado_repository import (
     SqliteHistorialEstadoRepository,
 )
+from src.infrastructure.repositories.sqlite_mantenimiento_repository import (
+    SqliteMantenimientoRepository,
+)
 from src.infrastructure.repositories.sqlite_planta_repository import SqlitePlantaRepository
 from src.infrastructure.repositories.sqlite_proveedor_repository import (
     SqliteCategoriaRepository,
@@ -50,6 +53,7 @@ class SqliteUnidadDeTrabajo:
     facturas: SqliteFacturaRepository
     proveedores: SqliteProveedorRepository
     categorias: SqliteCategoriaRepository
+    mantenimientos: SqliteMantenimientoRepository
 
     def __init__(self, db: DatabaseManager) -> None:
         self._db = db
@@ -71,6 +75,7 @@ class SqliteUnidadDeTrabajo:
         self.facturas = SqliteFacturaRepository(conn)
         self.proveedores = SqliteProveedorRepository(conn)
         self.categorias = SqliteCategoriaRepository(conn)
+        self.mantenimientos = SqliteMantenimientoRepository(conn)
         return self
 
     def __exit__(

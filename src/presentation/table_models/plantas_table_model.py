@@ -115,7 +115,6 @@ class PlantasTableModel(QAbstractTableModel):
     # Van en camelCase (rowCount, headerData...) porque SOBRESCRIBEN métodos de Qt:
     # Qt los llama por ese nombre exacto, así que no se pueden traducir.
 
-
     def rowCount(self, parent: ModelIndex = QModelIndex()) -> int:  # noqa: B008
         return 0 if parent.isValid() else len(self._plantas)
 
