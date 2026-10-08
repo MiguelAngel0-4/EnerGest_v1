@@ -14,6 +14,14 @@ from datetime import date, datetime
 from types import TracebackType
 from typing import Self
 
+from src.business.models.comercial import (
+    Alquiler,
+    Cliente,
+    DatosContrato,
+    DatosIngreso,
+    Ingreso,
+    TipoIngreso,
+)
 from src.business.models.estado_planta import EstadoPlanta
 from src.business.models.gasto import (
     CategoriaGasto,
@@ -56,6 +64,15 @@ class AlmacenFake:
     mantenimientos: dict[int, tuple[int, DatosMantenimiento, bool, str | None]] = field(
         default_factory=dict
     )
+
+    # Módulo comercial
+    clientes: dict[int, Cliente] = field(default_factory=dict)
+    # alquiler_id -> (planta_id, contrato, fecha_inicio, fecha_fin, valor_liquidado)
+    alquileres: dict[int, tuple[int, DatosContrato, date, date | None, int | None]] = field(
+        default_factory=dict
+    )
+    # ingreso_id -> (planta_id, tipo, datos, alquiler_id, cliente_id, anulado, motivo)
+    ingresos: dict[int, tuple] = field(default_factory=dict)
 
     def nuevo_id(self) -> int:
         self.contador += 1
@@ -368,6 +385,147 @@ class FakeMantenimientoRepository:
         return sorted(nombres, key=str.casefold)
 
 
+class FakeClienteRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def insertar(self, nombre: str, documento: str | None, telefono: str | None) -> int:
+        cliente_id = self._a.nuevo_id()
+        self._a.clientes[cliente_id] = Cliente(cliente_id, nombre, documento, telefono)
+        return cliente_id
+
+    def obtener(self, cliente_id: int) -> Cliente | None:
+        return self._a.clientes.get(cliente_id)
+
+    def listar(self) -> list[Cliente]:
+        return sorted(
+            (c for c in self._a.clientes.values() if c.activo), key=lambda c: c.nombre.casefold()
+        )
+
+    def existe_nombre(self, nombre: str) -> bool:
+        objetivo = nombre.strip().casefold()
+        return any(c.nombre.strip().casefold() == objetivo for c in self._a.clientes.values())
+
+    def existe_documento(self, documento: str) -> bool:
+        objetivo = documento.strip().casefold()
+        return any(
+            (c.documento or "").strip().casefold() == objetivo for c in self._a.clientes.values()
+        )
+
+
+class FakeAlquilerRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def insertar(self, planta_id: int, contrato: DatosContrato, fecha_inicio: date) -> int:
+        if self.activo_de(planta_id) is not None:  # Igual que el índice único de SQLite
+            raise RuntimeError("Ya hay un contrato activo para esta planta")
+        alquiler_id = self._a.nuevo_id()
+        self._a.alquileres[alquiler_id] = (planta_id, contrato, fecha_inicio, None, None)
+        return alquiler_id
+
+    def obtener(self, alquiler_id: int) -> Alquiler | None:
+        if alquiler_id not in self._a.alquileres:
+            return None
+        planta_id, contrato, inicio, fin, liquidado = self._a.alquileres[alquiler_id]
+        cobrado = sum(
+            datos.valor
+            for (_, _, datos, a_id, _, anulado, _) in self._a.ingresos.values()
+            if a_id == alquiler_id and not anulado
+        )
+        lecturas = [
+            c.horometro
+            for c in self._a.cambios
+            if c.alquiler_id == alquiler_id and c.horometro is not None
+        ]
+        horas = max(lecturas) - min(lecturas) if len(lecturas) >= 2 else None
+        return Alquiler(
+            alquiler_id,
+            planta_id,
+            contrato.cliente_id,
+            self._a.clientes[contrato.cliente_id].nombre,
+            inicio,
+            fin,
+            contrato.modalidad,
+            contrato.tarifa,
+            liquidado,
+            contrato.observaciones,
+            cobrado,
+            horas,
+        )
+
+    def activo_de(self, planta_id: int) -> Alquiler | None:
+        for alquiler_id, (p_id, _, _, fin, _) in self._a.alquileres.items():
+            if p_id == planta_id and fin is None:
+                return self.obtener(alquiler_id)
+        return None
+
+    def cerrar(self, alquiler_id: int, fecha_fin: date, valor_liquidado: int) -> None:
+        planta_id, contrato, inicio, _, _ = self._a.alquileres[alquiler_id]
+        self._a.alquileres[alquiler_id] = (planta_id, contrato, inicio, fecha_fin, valor_liquidado)
+
+    def actualizar_condiciones(self, alquiler_id: int, contrato: DatosContrato) -> None:
+        planta_id, _, inicio, fin, liquidado = self._a.alquileres[alquiler_id]
+        self._a.alquileres[alquiler_id] = (planta_id, contrato, inicio, fin, liquidado)
+
+    def listar_por_planta(self, planta_id: int) -> list[Alquiler]:
+        lista = [self.obtener(i) for i, v in self._a.alquileres.items() if v[0] == planta_id]
+        return sorted((a for a in lista if a), key=lambda a: (a.fecha_inicio, a.id), reverse=True)
+
+    def clientes_actuales(self) -> dict[int, str]:
+        actuales = {}
+        for alquiler_id, (planta_id, _, _, fin, _) in self._a.alquileres.items():
+            if fin is None:
+                actuales[planta_id] = self.obtener(alquiler_id).cliente_nombre  # type: ignore[union-attr]
+        return actuales
+
+
+class FakeIngresoRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def insertar(
+        self,
+        planta_id: int,
+        tipo: TipoIngreso,
+        datos: DatosIngreso,
+        alquiler_id: int | None = None,
+        cliente_id: int | None = None,
+    ) -> int:
+        ingreso_id = self._a.nuevo_id()
+        self._a.ingresos[ingreso_id] = (
+            planta_id,
+            tipo,
+            datos,
+            alquiler_id,
+            cliente_id,
+            False,
+            None,
+        )
+        return ingreso_id
+
+    def obtener(self, ingreso_id: int) -> Ingreso | None:
+        if ingreso_id not in self._a.ingresos:
+            return None
+        planta_id, tipo, datos, alquiler_id, cliente_id, anulado, motivo = self._a.ingresos[
+            ingreso_id
+        ]
+        nombre = self._a.clientes[cliente_id].nombre if cliente_id else None
+        return Ingreso(
+            ingreso_id, planta_id, tipo, alquiler_id, cliente_id, nombre, datos, anulado, motivo
+        )
+
+    def anular(self, ingreso_id: int, motivo: str) -> None:
+        valores = list(self._a.ingresos[ingreso_id])
+        valores[5], valores[6] = True, motivo
+        self._a.ingresos[ingreso_id] = tuple(valores)
+
+    def listar_por_planta(self, planta_id: int, incluir_anulados: bool = False) -> list[Ingreso]:
+        lista = [self.obtener(i) for i, v in self._a.ingresos.items() if v[0] == planta_id]
+        vigentes = [i for i in lista if i and (incluir_anulados or not i.anulado)]
+        return sorted(vigentes, key=lambda i: (i.datos.fecha, i.id), reverse=True)
+
+
 class FakeUnidadDeTrabajo:
     """Simula la transacción: si hay error, restaura la copia tomada al entrar."""
 
@@ -382,6 +540,9 @@ class FakeUnidadDeTrabajo:
         self.proveedores = FakeProveedorRepository(almacen)
         self.categorias = FakeCategoriaRepository(almacen)
         self.mantenimientos = FakeMantenimientoRepository(almacen)
+        self.clientes = FakeClienteRepository(almacen)
+        self.alquileres = FakeAlquilerRepository(almacen)
+        self.ingresos = FakeIngresoRepository(almacen)
 
     def __enter__(self) -> Self:
         self._respaldo = copy.deepcopy(vars(self._almacen))

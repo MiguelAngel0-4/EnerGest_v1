@@ -22,8 +22,8 @@ class SqliteHistorialEstadoRepository:
     def registrar(self, cambio: CambioEstado) -> None:
         self._conn.execute(
             "INSERT INTO historial_estados "
-            "(planta_id, estado_anterior, estado_nuevo, fecha, motivo, horometro) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "(planta_id, estado_anterior, estado_nuevo, fecha, motivo, horometro, alquiler_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 cambio.planta_id,
                 cambio.estado_anterior.value if cambio.estado_anterior else None,
@@ -31,13 +31,15 @@ class SqliteHistorialEstadoRepository:
                 fecha_a_texto(cambio.fecha),
                 cambio.motivo,
                 cambio.horometro,
+                cambio.alquiler_id,
             ),
         )
 
     def listar_por_planta(self, planta_id: int) -> list[CambioEstado]:
         # Orden por fecha y, en el mismo día, por orden de registro (id).
         filas = self._conn.execute(
-            "SELECT planta_id, estado_anterior, estado_nuevo, fecha, motivo, horometro "
+            "SELECT planta_id, estado_anterior, estado_nuevo, fecha, motivo, horometro, "
+            "alquiler_id "
             "FROM historial_estados WHERE planta_id = ? ORDER BY fecha, id",
             (planta_id,),
         ).fetchall()
@@ -51,6 +53,7 @@ class SqliteHistorialEstadoRepository:
                 fecha=texto_a_fecha_obligatoria(f["fecha"]),
                 motivo=f["motivo"],
                 horometro=f["horometro"],
+                alquiler_id=f["alquiler_id"],
             )
             for f in filas
         ]

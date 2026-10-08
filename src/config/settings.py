@@ -23,7 +23,7 @@ DB_TIMEOUT_SECONDS: Final[float] = 10.0
 
 # Versión del esquema. Se guarda en PRAGMA user_version y permitirá
 # aplicar migraciones ordenadas en futuras versiones.
-SCHEMA_VERSION: Final[int] = 3
+SCHEMA_VERSION: Final[int] = 4
 
 # Ruta del script SQL relativa a la raíz del proyecto (o del .exe).
 SCHEMA_RELATIVE_PATH: Final[str] = "src/infrastructure/database/schema.sql"

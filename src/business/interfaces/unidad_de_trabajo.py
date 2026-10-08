@@ -16,6 +16,11 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Protocol, Self
 
+from src.business.interfaces.comercial_repository import (
+    IAlquilerRepository,
+    IClienteRepository,
+    IIngresoRepository,
+)
 from src.business.interfaces.gasto_repository import (
     ICategoriaRepository,
     IFacturaRepository,
@@ -43,6 +48,10 @@ class IUnidadDeTrabajo(Protocol):
     categorias: ICategoriaRepository
     # Módulo de mantenimientos (Actividad 4.2)
     mantenimientos: IMantenimientoRepository
+    # Módulo comercial (Actividad 4.3)
+    clientes: IClienteRepository
+    alquileres: IAlquilerRepository
+    ingresos: IIngresoRepository
 
     def __enter__(self) -> Self:
         """Inicia la transacción."""

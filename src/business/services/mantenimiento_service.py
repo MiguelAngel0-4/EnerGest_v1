@@ -13,11 +13,11 @@ Reglas aprobadas:
 7. No se borran: se anulan con motivo, junto con sus gastos.
 """
 
-import calendar
 import logging
 from collections.abc import Callable
 from datetime import date
 
+from src.business.calendario import sumar_meses
 from src.business.exceptions import (
     NegocioError,
     PlantaNoEncontradaError,
@@ -222,10 +222,7 @@ class MantenimientoService:
         Suma meses de calendario respetando el fin de mes: 31 de agosto + 6 meses
         = 28 (o 29) de febrero, no un "31 de febrero" inexistente.
         """
-        mes_total = fecha.month - 1 + intervalo_meses
-        anio, mes = fecha.year + mes_total // 12, mes_total % 12 + 1
-        dia = min(fecha.day, calendar.monthrange(anio, mes)[1])
-        return date(anio, mes, dia), horometro + intervalo_horas
+        return sumar_meses(fecha, intervalo_meses), horometro + intervalo_horas
 
     # ------------------------------------------------------------------ #
     # Internos
