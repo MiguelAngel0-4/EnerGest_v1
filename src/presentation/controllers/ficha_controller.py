@@ -16,6 +16,14 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
 
 from src.business.exceptions import NegocioError, ValidacionError
+from src.business.models.comercial import (
+    Alquiler,
+    DatosContrato,
+    DatosIngreso,
+    Ingreso,
+    ModalidadAlquiler,
+    TipoIngreso,
+)
 from src.business.models.gasto import DatosFactura, DatosGasto, FacturaProveedor, GastoDetalle
 from src.business.models.mantenimiento import (
     DatosMantenimiento,
@@ -24,14 +32,22 @@ from src.business.models.mantenimiento import (
     TipoMantenimiento,
 )
 from src.business.models.planta import Planta
+from src.business.services.comercial_service import ComercialService
 from src.business.services.gasto_service import GastoService
 from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
+from src.presentation.controllers.clientes import crear_cliente_desde, opciones_clientes
 from src.presentation.controllers.textos import (
     FORMATO_FECHA,
     describir_planta,
     filas_historial_consecutivos,
     filas_historial_estados,
+    texto_liquidacion,
+)
+from src.presentation.dialogs.comercial_dialogs import (
+    ConceptoIngreso,
+    CorregirContratoDialog,
+    RegistrarIngresoDialog,
 )
 from src.presentation.dialogs.ficha_planta_dialog import FichaPlantaDialog
 from src.presentation.dialogs.gasto_dialogs import (
@@ -80,6 +96,7 @@ class FichaPlantaController(QObject):
         parent: QObject | None = None,
         intervalo_meses: int = 6,
         intervalo_horas: int = 250,
+        comercial: ComercialService | None = None,
     ) -> None:
         """
         Args:
@@ -92,6 +109,8 @@ class FichaPlantaController(QObject):
         self._mantenimientos = mantenimientos
         self._intervalo_meses = intervalo_meses
         self._intervalo_horas = intervalo_horas
+        self._comercial = comercial
+        self._ver_ingresos_anulados = False
         self._ventana_padre = ventana_padre
         self._planta: Planta | None = None
         self._ficha: FichaPlantaDialog | None = None
@@ -135,8 +154,16 @@ class FichaPlantaController(QObject):
         ficha.mantenimientos.mostrar_anulados_cambiado.connect(
             self._cambiar_ver_mantenimientos_anulados
         )
+        ficha.ingresos.registrar_solicitado.connect(self.registrar_ingreso)
+        ficha.ingresos.anular_solicitado.connect(self.anular_ingreso)
+        ficha.ingresos.corregir_contrato_solicitado.connect(self.corregir_contrato)
+        ficha.ingresos.mostrar_anulados_cambiado.connect(self._cambiar_ver_ingresos_anulados)
+        if self._comercial is None:
+            ficha.ingresos.deshabilitar_registro("El módulo comercial no está disponible.")
+        self._ver_ingresos_anulados = False
         self._recargar_gastos()
         self._recargar_mantenimientos()
+        self._recargar_ingresos()
         ficha.mostrar_pestana(pestana)
         ficha.exec()
         ficha.deleteLater()
@@ -307,6 +334,169 @@ class FichaPlantaController(QObject):
                 )
             )
         return insumos
+
+    # ------------------------------------------------------------------ #
+    # Ingresos (Actividad 4.3)
+    # ------------------------------------------------------------------ #
+
+    def registrar_ingreso(self) -> None:
+        if self._planta is None or self._ficha is None or self._comercial is None:
+            return
+        comercial = self._comercial
+        with self._capturar_errores("Registrar ingreso", self._ficha.ingresos):
+            dialogo = RegistrarIngresoDialog(
+                describir_planta(self._planta), self._conceptos_ingreso(), self._ficha
+            )
+            dialogo.set_clientes(opciones_clientes(comercial))
+            dialogo.nuevo_cliente_solicitado.connect(
+                lambda: crear_cliente_desde(dialogo, comercial)
+            )
+            dialogo.guardar_solicitado.connect(
+                lambda valores: self._guardar(dialogo, lambda: self._registrar_ingreso(valores))
+            )
+            if self._ejecutar(dialogo):
+                self._recargar_ingresos()
+
+    def anular_ingreso(self, ingreso_id: int) -> None:
+        if self._ficha is None or self._comercial is None:
+            return
+        vista = self._ficha.ingresos
+        motivo = vista.pedir_motivo(
+            "Anular ingreso", "Motivo de la anulación (el ingreso quedará tachado, no se borra):"
+        )
+        if motivo is None:
+            return
+        with self._capturar_errores("Anular ingreso", vista):
+            self._comercial.anular_ingreso(ingreso_id, motivo)
+            self._recargar_ingresos()
+
+    def corregir_contrato(self) -> None:
+        if self._planta is None or self._ficha is None or self._comercial is None:
+            return
+        comercial = self._comercial
+        with self._capturar_errores("Corregir contrato", self._ficha.ingresos):
+            activo = comercial.contrato_activo(self._planta.id)
+            if activo is None:
+                return
+            dialogo = CorregirContratoDialog(
+                f"Contrato con {activo.cliente_nombre} desde "
+                f"{activo.fecha_inicio.strftime(FORMATO_FECHA)}",
+                self._ficha,
+            )
+            dialogo.contrato.set_clientes(opciones_clientes(comercial))
+            dialogo.contrato.cargar(
+                activo.cliente_id, activo.modalidad.value, activo.tarifa, activo.observaciones
+            )
+            dialogo.nuevo_cliente_solicitado.connect(
+                lambda: crear_cliente_desde(dialogo.contrato, comercial)
+            )
+            dialogo.guardar_solicitado.connect(
+                lambda v: self._guardar(
+                    dialogo,
+                    lambda: comercial.corregir_contrato(
+                        activo.id,
+                        DatosContrato(
+                            v["cliente_id"],
+                            ModalidadAlquiler(v["modalidad"]),
+                            v["tarifa"],
+                            v["observaciones"],
+                        ),
+                    ),
+                )
+            )
+            if self._ejecutar(dialogo):
+                self._recargar_ingresos()
+
+    def _registrar_ingreso(self, valores: dict[str, Any]) -> None:
+        if self._planta is None or self._comercial is None:
+            return
+        datos = DatosIngreso(
+            valores["fecha"], valores["descripcion"], valores["valor"], valores["numero_documento"]
+        )
+        if valores["alquiler_id"] is not None:
+            self._comercial.registrar_cobro(valores["alquiler_id"], datos)
+        else:
+            self._comercial.registrar_ingreso(self._planta.id, datos, valores["cliente_id"])
+
+    def _conceptos_ingreso(self) -> list[ConceptoIngreso]:
+        """El contrato activo, los contratos con saldo pendiente y "Otro ingreso"."""
+        conceptos: list[ConceptoIngreso] = []
+        if self._planta is None or self._comercial is None:
+            return [ConceptoIngreso("Otro ingreso", None, "", "")]
+        for alquiler in self._comercial.alquileres(self._planta.id):
+            desde = alquiler.fecha_inicio.strftime(FORMATO_FECHA)
+            if alquiler.activo:
+                conceptos.append(
+                    ConceptoIngreso(
+                        f"Contrato activo · {alquiler.cliente_nombre} (desde {desde})",
+                        alquiler.id,
+                        f"Cobrado hasta hoy: {formatear_moneda(alquiler.cobrado)}",
+                        f"Cobro del alquiler a {alquiler.cliente_nombre}",
+                    )
+                )
+            elif alquiler.saldo:
+                hasta = alquiler.fecha_fin.strftime(FORMATO_FECHA) if alquiler.fecha_fin else ""
+                conceptos.append(
+                    ConceptoIngreso(
+                        f"Saldo del alquiler {desde} – {hasta} · {alquiler.cliente_nombre}",
+                        alquiler.id,
+                        f"Saldo pendiente: {formatear_moneda(alquiler.saldo)}",
+                        f"Pago del saldo del alquiler {desde} – {hasta}",
+                    )
+                )
+        conceptos.append(ConceptoIngreso("Otro ingreso", None, "", ""))
+        return conceptos
+
+    def _recargar_ingresos(self) -> None:
+        if self._planta is None or self._ficha is None or self._comercial is None:
+            return
+        vista = self._ficha.ingresos
+        with self._capturar_errores("Cargar ingresos", vista):
+            planta_id = self._planta.id
+            ingresos = self._comercial.ingresos(planta_id, self._ver_ingresos_anulados)
+            alquileres = self._comercial.alquileres(planta_id)
+            vista.mostrar_filas([_fila_ingreso(i) for i in ingresos])
+            vista.mostrar_alquileres([_fila_alquiler(a) for a in alquileres])
+
+            preliminar = self._comercial.liquidacion_preliminar(planta_id)
+            if preliminar is None:
+                vista.mostrar_contrato(None)
+            else:
+                activo, liquidacion = preliminar
+                acumulado = liquidacion.valor
+                vista.mostrar_contrato(
+                    f"<b>Contrato activo</b> · {activo.cliente_nombre} · desde "
+                    f"{activo.fecha_inicio.strftime(FORMATO_FECHA)} · "
+                    f"{activo.modalidad.etiqueta.lower()} {formatear_moneda(activo.tarifa)}<br>"
+                    f"Acumulado a hoy: "
+                    f"{texto_liquidacion(activo.modalidad, activo.tarifa, liquidacion)} · "
+                    f"Cobrado: {formatear_moneda(activo.cobrado)} · "
+                    f"Por cobrar: {formatear_moneda(max(acumulado - activo.cobrado, 0))}"
+                )
+
+            vigentes = [i for i in ingresos if not i.anulado]
+            if not vigentes and not alquileres:
+                vista.mostrar_resumen("Esta planta no tiene ingresos registrados.")
+                return
+            por_tipo = {t: sum(i.datos.valor for i in vigentes if i.tipo is t) for t in TipoIngreso}
+            detalle = " · ".join(
+                f"{tipo.etiqueta.lower()} {formatear_moneda(valor)}"
+                for tipo, valor in por_tipo.items()
+                if valor
+            )
+            pendiente = sum(a.saldo or 0 for a in alquileres if not a.activo)
+            texto = f"Ingresos: {formatear_moneda(sum(por_tipo.values()))}"
+            if detalle:
+                texto += f" ({detalle})"
+            if pendiente:
+                texto += (
+                    f" · Saldo por cobrar de alquileres cerrados: {formatear_moneda(pendiente)}"
+                )
+            vista.mostrar_resumen(texto)
+
+    def _cambiar_ver_ingresos_anulados(self, ver: bool) -> None:
+        self._ver_ingresos_anulados = ver
+        self._recargar_ingresos()
 
     # ------------------------------------------------------------------ #
     # Facturas y proveedores
@@ -534,4 +724,38 @@ def _fila_mantenimiento(mantenimiento: Mantenimiento) -> FilaRegistro:
         ),
         mantenimiento.anulado,
         mantenimiento.motivo_anulacion,
+    )
+
+
+def _fila_ingreso(ingreso: Ingreso) -> FilaRegistro:
+    datos = ingreso.datos
+    return FilaRegistro(
+        ingreso.id,
+        (
+            datos.fecha.strftime(FORMATO_FECHA),
+            ingreso.tipo.etiqueta,
+            ingreso.cliente_nombre or "—",
+            datos.descripcion,
+            datos.numero_documento or "—",
+            formatear_moneda(datos.valor),
+        ),
+        ingreso.anulado,
+        ingreso.motivo_anulacion,
+    )
+
+
+def _fila_alquiler(alquiler: Alquiler) -> tuple[str, ...]:
+    def dinero(valor: int | None) -> str:
+        return formatear_moneda(valor) if valor is not None else "—"
+
+    return (
+        alquiler.cliente_nombre,
+        alquiler.fecha_inicio.strftime(FORMATO_FECHA),
+        alquiler.fecha_fin.strftime(FORMATO_FECHA) if alquiler.fecha_fin else "Activo",
+        alquiler.modalidad.etiqueta,
+        formatear_moneda(alquiler.tarifa),
+        formatear_entero(alquiler.horas_uso, "h") if alquiler.horas_uso is not None else "—",
+        dinero(alquiler.valor_liquidado),
+        formatear_moneda(alquiler.cobrado),
+        dinero(alquiler.saldo),
     )

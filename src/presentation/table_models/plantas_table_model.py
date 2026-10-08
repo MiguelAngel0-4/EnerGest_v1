@@ -99,12 +99,17 @@ class PlantasTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._plantas: list[Planta] = []
         self._iconos: dict[EstadoPlanta, QIcon] = {}
+        self._clientes: dict[int, str] = {}  # planta_id -> cliente actual
 
     def cargar(self, plantas: list[Planta]) -> None:
         """Reemplaza todo el contenido y avisa a la tabla que se redibuje."""
         self.beginResetModel()
         self._plantas = list(plantas)
         self.endResetModel()
+
+    def set_clientes_actuales(self, clientes: dict[int, str]) -> None:
+        """Cliente que tiene cada planta alquilada (se muestra al pasar el mouse)."""
+        self._clientes = dict(clientes)
 
     @property
     def plantas(self) -> list[Planta]:
@@ -149,6 +154,9 @@ class PlantasTableModel(QAbstractTableModel):
             return planta.datos.marca
         if role == POTENCIA_ROLE:
             return planta.datos.potencia_kva
+        if role == Qt.ItemDataRole.ToolTipRole and columna == Columna.ESTADO:
+            cliente = self._clientes.get(planta.id)
+            return f"Alquilada a {cliente}" if cliente else None
         if role == Qt.ItemDataRole.DecorationRole and columna == Columna.ESTADO:
             return self._icono_estado(planta.estado)
         if role == Qt.ItemDataRole.TextAlignmentRole and columna in _COLUMNAS_CENTRADAS:
