@@ -4,3 +4,4 @@ black>=24.0
 ruff>=0.5
 pyinstaller>=6.0
 pytest-html>=4.0
+pypdf>=4.0

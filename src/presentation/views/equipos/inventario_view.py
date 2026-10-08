@@ -8,12 +8,18 @@ avisa lo que el usuario pidió mediante SEÑALES, pero no decide nada ni
 conoce los servicios. Por eso no importa nada de business ni infrastructure.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Final
 
-from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt, QTimer, Signal
+from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -236,6 +242,46 @@ class InventarioView(QWidget):
 
     def mostrar_info(self, titulo: str, mensaje: str) -> None:
         QMessageBox.information(self, titulo, mensaje)
+
+    def pedir_ruta_guardado(self, titulo: str, sugerida: Path, filtro: str) -> Path | None:
+        """Diálogo "Guardar como". Devuelve None si el usuario cancela."""
+        ruta, _filtro = QFileDialog.getSaveFileName(self, titulo, str(sugerida), filtro)
+        return Path(ruta) if ruta else None
+
+    def preguntar_tras_generar(self, titulo: str, mensaje: str) -> str:
+        """
+        Mensaje final con tres opciones.
+
+        Returns:
+            "abrir", "carpeta" o "cerrar".
+        """
+        caja = QMessageBox(self)
+        caja.setIcon(QMessageBox.Icon.Information)
+        caja.setWindowTitle(titulo)
+        caja.setText(mensaje)
+        boton_abrir = caja.addButton("Abrir PDF", QMessageBox.ButtonRole.AcceptRole)
+        boton_carpeta = caja.addButton("Abrir carpeta", QMessageBox.ButtonRole.ActionRole)
+        caja.addButton("Cerrar", QMessageBox.ButtonRole.RejectRole)
+        caja.setDefaultButton(boton_abrir)
+        caja.exec()
+        if caja.clickedButton() is boton_abrir:
+            return "abrir"
+        if caja.clickedButton() is boton_carpeta:
+            return "carpeta"
+        return "cerrar"
+
+    def abrir_ruta(self, ruta: Path) -> bool:
+        """Abre un archivo o carpeta con el programa predeterminado de Windows."""
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(ruta)))
+
+    @contextmanager
+    def cursor_espera(self) -> Iterator[None]:
+        """Muestra el cursor de "ocupado" mientras dura una operación."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            yield
+        finally:
+            QApplication.restoreOverrideCursor()  # Se restaura aunque haya error
 
     def _combo(self, nombre: str) -> QComboBox:
         combos = {

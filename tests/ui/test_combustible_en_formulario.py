@@ -9,9 +9,12 @@ from datetime import date
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from src.business.models.hoja_vida import DatosEmpresa
 from src.business.models.planta import TipoCombustible
 from src.business.services.consecutivo_service import ConsecutivoService
+from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.planta_service import PlantaService
+from src.infrastructure.reports.pdf_hoja_vida import GeneradorPdfHojaVida
 from src.presentation.controllers.inventario_controller import InventarioController
 from src.presentation.views.equipos.inventario_view import InventarioView
 from tests.unit.fakes import AlmacenFake, FakeUnidadDeTrabajo
@@ -20,10 +23,12 @@ from tests.unit.fakes import AlmacenFake, FakeUnidadDeTrabajo
 @pytest.fixture
 def controlador(qapp: QApplication) -> InventarioController:
     almacen = AlmacenFake()
-    servicio = PlantaService(
-        lambda: FakeUnidadDeTrabajo(almacen), ConsecutivoService(), lambda: date(2026, 9, 30)
+    fabrica = lambda: FakeUnidadDeTrabajo(almacen)  # noqa: E731
+    servicio = PlantaService(fabrica, ConsecutivoService(), lambda: date(2026, 9, 30))
+    hojas = HojaVidaService(
+        fabrica, GeneradorPdfHojaVida(), lambda: DatosEmpresa("Prueba"), "0.4.0"
     )
-    return InventarioController(servicio, InventarioView())
+    return InventarioController(servicio, hojas, InventarioView())
 
 
 def _opciones_combustible(controlador: InventarioController, actual: TipoCombustible | None):
