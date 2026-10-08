@@ -1,5 +1,46 @@
 # Registro de cambios – EnerGest
 
+## [0.6.0] – 2026-10-10
+
+### Agregado
+
+- Pestaña "Mantenimientos" en la ficha de la planta: registro de mantenimientos
+  preventivos y correctivos con fecha, lectura del horómetro, técnico y trabajo
+  realizado.
+- Insumos y mano de obra dentro del mantenimiento, registrados automáticamente
+  como gastos de la planta. El botón "Cargar insumos de la ficha técnica" llena
+  las líneas con los filtros y el aceite registrados.
+- Programación del próximo mantenimiento por fecha, por horas o ambas ("lo que
+  ocurra primero"). En los preventivos se sugiere +6 meses y +250 horas.
+- Sección "Mantenimientos pendientes" en el inventario, con las plantas vencidas
+  en rojo y las próximas en naranja. Un clic abre la ficha en esa pestaña.
+- Sección "7. Historial de mantenimientos" en la hoja de vida PDF, con el
+  próximo mantenimiento programado.
+- Anulación de mantenimientos con motivo: también anula sus gastos, y su lectura
+  del horómetro deja de contar.
+
+### Cambiado
+
+- La última lectura del horómetro ahora incluye las tomadas en los mantenimientos.
+- Al cerrar la ficha de una planta, el inventario se actualiza (horómetro y alertas).
+- Los gastos que nacen de un mantenimiento se identifican en la pestaña Gastos.
+
+### Corregido
+
+- Los botones de opción y las casillas no mostraban su círculo o recuadro.
+- Las firmas de la hoja de vida podían quedar solas en una página.
+
+### Reglas de negocio
+
+- El horómetro del mantenimiento es obligatorio y no puede ser menor que la
+  última lectura conocida.
+- La fecha de un mantenimiento no puede ser anterior a la del último registrado.
+
+### Base de datos
+
+- Migración 003: programación por horas y anulación de mantenimientos. Se aplica
+  automáticamente al abrir la aplicación, con respaldo previo en `data/respaldos/`.
+
 ## [0.5.0] – 2026-10-09
 
 ### Agregado
