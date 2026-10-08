@@ -48,14 +48,16 @@ _COLUMNAS_DATOS: Final[tuple[str, ...]] = (
 )
 
 # Consulta base: todas las columnas + el horómetro actual CALCULADO (no se guarda
-# duplicado). Es el mayor valor entre el horómetro inicial y las lecturas de los
-# cambios de estado. Cuando exista el módulo de mantenimientos, se sumarán aquí
-# sus lecturas. MAX(a, b) con dos argumentos es el máximo escalar de SQLite.
+# duplicado). Es el mayor valor entre el horómetro inicial, las lecturas de los
+# cambios de estado (alquileres) y las de los mantenimientos NO anulados.
+# MAX(a, b, c) con varios argumentos es el máximo escalar de SQLite.
 _SQL_SELECT: Final[str] = """
     SELECT p.*,
            MAX(p.horometro_inicial,
                COALESCE((SELECT MAX(h.horometro) FROM historial_estados h
-                         WHERE h.planta_id = p.id), 0)) AS horometro_actual
+                         WHERE h.planta_id = p.id), 0),
+               COALESCE((SELECT MAX(m.horometro) FROM mantenimientos m
+                         WHERE m.planta_id = p.id AND m.anulado = 0), 0)) AS horometro_actual
     FROM plantas p
 """
 

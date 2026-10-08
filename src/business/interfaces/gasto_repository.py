@@ -29,6 +29,10 @@ class IGastoRepository(Protocol):
 
     def anular(self, gasto_id: int, motivo: str) -> None: ...
 
+    def anular_por_mantenimiento(self, mantenimiento_id: int, motivo: str) -> None:
+        """Anula todos los gastos vigentes que nacieron de un mantenimiento."""
+        ...
+
     def listar_por_planta(
         self, planta_id: int, incluir_anulados: bool = False
     ) -> list[GastoDetalle]:

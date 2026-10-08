@@ -25,6 +25,7 @@ from src.business.models.gasto import (
     Proveedor,
     ResumenGastos,
 )
+from src.business.models.mantenimiento import DatosMantenimiento, Mantenimiento
 from src.business.models.planta import CambioEstado, DatosPlanta, Planta, RegistroConsecutivo
 
 FECHA_REGISTRO_FIJA = datetime(2026, 1, 1, 8, 0, 0)
@@ -50,7 +51,11 @@ class AlmacenFake:
             )
         }
     )
-    contador: int = 1000  # Ids de gastos, facturas y proveedores
+    contador: int = 1000  # Ids de gastos, facturas, proveedores y mantenimientos
+    # Módulo de mantenimientos: (planta_id, datos, anulado, motivo)
+    mantenimientos: dict[int, tuple[int, DatosMantenimiento, bool, str | None]] = field(
+        default_factory=dict
+    )
 
     def nuevo_id(self) -> int:
         self.contador += 1
@@ -87,6 +92,11 @@ class FakePlantaRepository:
             c.horometro
             for c in self._a.cambios
             if c.planta_id == planta.id and c.horometro is not None
+        ]
+        lecturas += [
+            datos.horometro
+            for planta_id, datos, anulado, _ in self._a.mantenimientos.values()
+            if planta_id == planta.id and not anulado
         ]
         return replace(planta, horometro_actual=max([planta.datos.horometro_inicial, *lecturas]))
 
@@ -178,6 +188,11 @@ class FakeGastoRepository:
             self._a.gastos[gasto_id], anulado=True, motivo_anulacion=motivo
         )
 
+    def anular_por_mantenimiento(self, mantenimiento_id: int, motivo: str) -> None:
+        for gasto_id, gasto in list(self._a.gastos.items()):
+            if gasto.mantenimiento_id == mantenimiento_id and not gasto.anulado:
+                self.anular(gasto_id, motivo)
+
     def listar_por_planta(
         self, planta_id: int, incluir_anulados: bool = False
     ) -> list[GastoDetalle]:
@@ -197,6 +212,11 @@ class FakeGastoRepository:
                     self._a.categorias[g.datos.categoria_id].nombre,
                     factura[0].numero_factura if factura else None,
                     proveedor,
+                    (
+                        self._a.mantenimientos[g.mantenimiento_id][1].fecha
+                        if g.mantenimiento_id
+                        else None
+                    ),
                 )
             )
         return detalles
@@ -295,6 +315,59 @@ class FakeCategoriaRepository:
         return [c for c in self._a.categorias.values() if c.activo]
 
 
+class FakeMantenimientoRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def insertar(self, planta_id: int, datos: DatosMantenimiento) -> int:
+        mantenimiento_id = self._a.nuevo_id()
+        self._a.mantenimientos[mantenimiento_id] = (planta_id, datos, False, None)
+        return mantenimiento_id
+
+    def obtener(self, mantenimiento_id: int) -> Mantenimiento | None:
+        if mantenimiento_id not in self._a.mantenimientos:
+            return None
+        planta_id, datos, anulado, motivo = self._a.mantenimientos[mantenimiento_id]
+        costo = sum(
+            g.datos.valor_total
+            for g in self._a.gastos.values()
+            if g.mantenimiento_id == mantenimiento_id and not g.anulado
+        )
+        return Mantenimiento(mantenimiento_id, planta_id, datos, anulado, motivo, costo)
+
+    def anular(self, mantenimiento_id: int, motivo: str) -> None:
+        planta_id, datos, _, _ = self._a.mantenimientos[mantenimiento_id]
+        self._a.mantenimientos[mantenimiento_id] = (planta_id, datos, True, motivo)
+
+    def listar_por_planta(
+        self, planta_id: int, incluir_anulados: bool = False
+    ) -> list[Mantenimiento]:
+        todos = [self.obtener(i) for i in self._a.mantenimientos]
+        lista = [
+            m
+            for m in todos
+            if m is not None and m.planta_id == planta_id and (incluir_anulados or not m.anulado)
+        ]
+        return sorted(lista, key=lambda m: (m.datos.fecha, m.id), reverse=True)
+
+    def ultimo_vigente(self, planta_id: int) -> Mantenimiento | None:
+        vigentes = self.listar_por_planta(planta_id)
+        return vigentes[0] if vigentes else None
+
+    def ultimos_por_planta(self) -> dict[int, Mantenimiento]:
+        plantas = {planta_id for planta_id, *_ in self._a.mantenimientos.values()}
+        ultimos = {p: self.ultimo_vigente(p) for p in plantas}
+        return {p: m for p, m in ultimos.items() if m is not None}
+
+    def tecnicos_registrados(self) -> list[str]:
+        nombres = {
+            datos.tecnico.strip()
+            for _, datos, _, _ in self._a.mantenimientos.values()
+            if datos.tecnico
+        }
+        return sorted(nombres, key=str.casefold)
+
+
 class FakeUnidadDeTrabajo:
     """Simula la transacción: si hay error, restaura la copia tomada al entrar."""
 
@@ -308,6 +381,7 @@ class FakeUnidadDeTrabajo:
         self.facturas = FakeFacturaRepository(almacen)
         self.proveedores = FakeProveedorRepository(almacen)
         self.categorias = FakeCategoriaRepository(almacen)
+        self.mantenimientos = FakeMantenimientoRepository(almacen)
 
     def __enter__(self) -> Self:
         self._respaldo = copy.deepcopy(vars(self._almacen))
