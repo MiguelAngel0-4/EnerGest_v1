@@ -101,6 +101,7 @@ class GastoDetalle:
     categoria: str
     numero_factura: str | None
     proveedor: str | None
+    mantenimiento_fecha: date | None = None  # Si el gasto nació de un mantenimiento
 
     @property
     def tiene_soporte(self) -> bool:

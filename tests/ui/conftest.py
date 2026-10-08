@@ -34,6 +34,13 @@ def escribir_como_usuario(widget: QWidget, texto: str) -> None:
     los mismos validadores que el teclado real. Fue la omisión de este tipo
     de prueba la que dejó pasar el defecto de los campos kW y tanque.
     """
+    if not texto.isascii():
+        # QTest solo simula teclas ASCII: con "é" o "ñ", Qt aborta el programa entero
+        # en lugar de lanzar un error. Mejor un mensaje claro que un cierre misterioso.
+        raise ValueError(
+            f"escribir_como_usuario solo admite texto ASCII; recibió {texto!r}. "
+            "Para tildes o eñes, asigne el texto con setText()."
+        )
     widget.setFocus()
     QTest.mouseClick(widget, Qt.MouseButton.LeftButton)
     QTest.keyClicks(widget, texto)

@@ -167,9 +167,7 @@ class PlantaFormDialog(QDialog):
             combo.addItem(texto, clave)
         return combo
 
-    def _construir_interfaz(
-        self, titulo: str, texto_consecutivo: str, texto_estado: str
-    ) -> None:
+    def _construir_interfaz(self, titulo: str, texto_consecutivo: str, texto_estado: str) -> None:
         encabezado = QLabel(titulo)
         encabezado.setObjectName("tituloVista")
 
@@ -374,9 +372,7 @@ class PlantaFormDialog(QDialog):
             _marcar_error(control, True)
             primero = primero or control
 
-        self._mensaje_general.setText(
-            " ".join(["Revise los campos marcados en rojo.", *sin_campo])
-        )
+        self._mensaje_general.setText(" ".join(["Revise los campos marcados en rojo.", *sin_campo]))
         self._mensaje_general.show()
         if primero is not None:
             primero.setFocus()

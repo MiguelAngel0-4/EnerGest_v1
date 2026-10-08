@@ -63,9 +63,7 @@ _VACIO = ParagraphStyle("vacio", parent=_NORMAL, fontName="Helvetica-Oblique", t
 _ETIQUETA = ParagraphStyle(
     "etiqueta", parent=_NORMAL, fontName="Helvetica-Bold", fontSize=8, textColor=AZUL
 )
-_ENCABEZADO_TABLA = ParagraphStyle(
-    "encabezado_tabla", parent=_ETIQUETA, textColor=colors.white
-)
+_ENCABEZADO_TABLA = ParagraphStyle("encabezado_tabla", parent=_ETIQUETA, textColor=colors.white)
 _SECCION = ParagraphStyle(
     "seccion", parent=_NORMAL, fontName="Helvetica-Bold", fontSize=10, textColor=colors.white
 )
@@ -175,8 +173,13 @@ class GeneradorPdfHojaVida:
             *self._seccion("4. Operación", self._tabla_operacion(hoja)),
             *self._seccion("5. Historial de estados", self._tabla_estados(hoja)),
             *self._seccion("6. Historial de números consecutivos", self._tabla_consecutivos(hoja)),
-            Spacer(1, 0.7 * cm),
-            KeepTogether(self._firmas()),  # Las firmas nunca se parten entre páginas
+            # La última sección y las firmas viajan JUNTAS: si no caben, pasan a la
+            # siguiente página juntas, y nunca quedan las firmas solas en una hoja.
+            *self._seccion(
+                "7. Historial de mantenimientos",
+                self._tabla_mantenimientos(hoja),
+                al_final=[Spacer(1, 0.7 * cm), self._firmas()],
+            ),
         ]
         documento.build(bloques, canvasmaker=fabricar_canvas)
 
@@ -314,8 +317,15 @@ class GeneradorPdfHojaVida:
     # --- Tablas ------------------------------------------------------------------
 
     @staticmethod
-    def _seccion(titulo: str, contenido: Flowable) -> list[Flowable]:
-        """Franja azul con el título + contenido. KeepTogether evita títulos huérfanos."""
+    def _seccion(
+        titulo: str, contenido: Flowable, al_final: list[Flowable] | None = None
+    ) -> list[Flowable]:
+        """
+        Franja azul con el título + contenido. KeepTogether evita títulos huérfanos.
+
+        Args:
+            al_final: Bloques que deben quedar en la misma página que la sección.
+        """
         franja = Table(
             [[Paragraph(titulo.upper(), _SECCION)]],
             colWidths=[ANCHO_UTIL],
@@ -327,12 +337,11 @@ class GeneradorPdfHojaVida:
                 ]
             ),
         )
-        return [Spacer(1, 0.25 * cm), KeepTogether([franja, Spacer(1, 0.08 * cm), contenido])]
+        bloque = [franja, Spacer(1, 0.08 * cm), contenido, *(al_final or [])]
+        return [Spacer(1, 0.25 * cm), KeepTogether(bloque)]
 
     @staticmethod
-    def _tabla_datos(
-        pares: list[tuple[str, str | None]], fondo_valores: Any = None
-    ) -> Table:
+    def _tabla_datos(pares: list[tuple[str, str | None]], fondo_valores: Any = None) -> Table:
         """Cuadrícula de 2 pares por fila: Etiqueta | Valor | Etiqueta | Valor."""
         celdas = [(Paragraph(etiqueta, _ETIQUETA), _valor(valor)) for etiqueta, valor in pares]
         if len(celdas) % 2:
@@ -422,6 +431,46 @@ class GeneradorPdfHojaVida:
             ["Número", "Asignado", "Liberado", "Motivo de liberación"],
             filas,
             [2.2 * cm, 2.6 * cm, 2.6 * cm, ANCHO_UTIL - 7.4 * cm],
+        )
+
+    @staticmethod
+    def _tabla_mantenimientos(hoja: HojaDeVida) -> Table:
+        filas = [
+            [
+                _texto(m.datos.fecha.strftime(FORMATO_FECHA)),
+                _texto(m.datos.tipo.etiqueta),
+                _texto(formatear_entero(m.datos.horometro, "h")),
+                _texto(m.datos.tecnico or ""),
+                _texto(m.datos.descripcion),
+                _texto(formatear_moneda(m.costo_total) if m.costo_total else ""),
+            ]
+            for m in hoja.mantenimientos
+        ]
+        tabla = _tabla_historial(
+            ["Fecha", "Tipo", "Horómetro", "Técnico", "Trabajo realizado", "Costo"],
+            filas,
+            [2.2 * cm, 2.1 * cm, 2.1 * cm, 2.8 * cm, ANCHO_UTIL - 11.6 * cm, 2.4 * cm],
+        )
+        if not hoja.mantenimientos or not hoja.mantenimientos[-1].tiene_programacion:
+            return tabla
+        # Bajo la tabla, el "sticker": cuándo toca el próximo, según el último.
+        ultimo = hoja.mantenimientos[-1].datos
+        partes = []
+        if ultimo.proxima_fecha:
+            partes.append(ultimo.proxima_fecha.strftime(FORMATO_FECHA))
+        if ultimo.proximo_horometro:
+            partes.append(formatear_entero(ultimo.proximo_horometro, "h"))
+        proximo = Paragraph(
+            f"<b>Próximo mantenimiento programado:</b> {' o '.join(partes)} "
+            "(lo que ocurra primero)",
+            _NORMAL,
+        )
+        return Table(
+            [[tabla], [proximo]],
+            colWidths=[ANCHO_UTIL],
+            style=TableStyle(
+                [("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]
+            ),
         )
 
     @staticmethod
