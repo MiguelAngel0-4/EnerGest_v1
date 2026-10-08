@@ -15,6 +15,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from src.business.services.comercial_service import ComercialService
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.services.gasto_service import GastoService
 from src.business.services.hoja_vida_service import HojaVidaService
@@ -97,6 +98,7 @@ def main() -> int:
         fabrica_uow, GeneradorPdfHojaVida(), empresa.obtener, settings.APP_VERSION
     )
     servicio_gastos = GastoService(fabrica_uow)
+    servicio_comercial = ComercialService(fabrica_uow, servicio_plantas)
     servicio_mantenimientos = MantenimientoService(
         fabrica_uow,
         dias_alerta=settings.ALERTA_DIAS_ANTICIPACION,
@@ -115,6 +117,7 @@ def main() -> int:
         ventana,
         intervalo_meses=settings.MANTENIMIENTO_INTERVALO_MESES,
         intervalo_horas=settings.MANTENIMIENTO_INTERVALO_HORAS,
+        comercial=servicio_comercial,
     )
     controlador_inventario = InventarioController(
         servicio_plantas,
@@ -123,6 +126,7 @@ def main() -> int:
         ventana,
         ficha=controlador_ficha,
         mantenimientos=servicio_mantenimientos,
+        comercial=servicio_comercial,
     )
 
     ventana.registro_solicitado.connect(controlador_inventario.abrir_registro)

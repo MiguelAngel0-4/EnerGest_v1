@@ -158,3 +158,54 @@ mantenimiento antiguo se conservó y su lectura pasó a contar en el horómetro 
 **Revisión visual:** se corrigieron la altura del formulario de mantenimiento
 (808 px a 697 px), el título recortado del panel de alertas y los indicadores
 de los botones de opción y casillas (sin círculo ni recuadro desde la versión 0.5.0).
+
+## Ciclo 7 — Ingresos: alquileres, ventas y cobros (Actividad 4.3)
+
+| Campo                | Detalle                                                   |
+| -------------------- | --------------------------------------------------------- |
+| Fecha                | 2026-10-12                                                |
+| Versión              | 0.7.0 (esquema de base de datos versión 4, migración 004) |
+| Responsable          | [Tu nombre]                                               |
+| Tipo de prueba       | Unitarias (135), integración (59) e interfaz (50)         |
+| Casos ejecutados     | 244 (36 nuevos en este ciclo)                             |
+| Aprobados / Fallidos | 244 / 0                                                   |
+| Evidencia            | 2026-10-12_v0.7.0_ingresos.html                           |
+
+**Pruebas de la fórmula de liquidación aprobada por la empresa:**
+
+| Caso                                      | Resultado esperado            | Prueba                                                                       |
+| ----------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------- |
+| 01/10 → 11/11, tarifa mensual $ 3.000.000 | 1 mes y 10 días = $ 4.000.000 | `test_ejemplos_aprobados_por_mes`                                            |
+| 01/10 → 21/10                             | 20 días = $ 2.000.000         | `test_ejemplos_aprobados_por_mes`                                            |
+| 01/10 → 01/12                             | 2 meses exactos = $ 6.000.000 | `test_ejemplos_aprobados_por_mes`                                            |
+| 31/01 → 28/02 (fin de mes)                | 1 mes = $ 3.000.000           | `test_ejemplos_aprobados_por_mes`                                            |
+| Entrega y devolución el mismo día         | Mínimo 1 día                  | `test_ejemplos_aprobados_por_mes`, `test_por_dia_cuenta_dias_con_minimo_uno` |
+| Fracción de peso                          | Redondeo al peso más cercano  | `test_redondeo_al_peso_mas_cercano`                                          |
+
+**Pruebas nuevas por regla de negocio:**
+
+| Regla                                                          | Prueba que la verifica                                                                        |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Alquilar = contrato + estado + lectura ligada, todo o nada     | `test_alquilar_crea_contrato_y_cambia_el_estado`, `test_un_alquiler_fallido_no_deja_contrato` |
+| Cobros parciales que se descuentan al cerrar                   | `test_devolver_por_mes_proporcional_con_anticipo`                                             |
+| Descuento negociado, nunca por debajo de lo cobrado            | `test_descuento_negociado_sin_bajar_de_lo_cobrado`                                            |
+| Saldo pendiente cobrable después, sin excederlo                | `test_saldo_pendiente_se_cobra_despues_sin_excederlo`                                         |
+| Un daño durante el alquiler cierra el contrato                 | `test_dano_durante_el_alquiler_cierra_el_contrato`                                            |
+| Alquileres anteriores a la 0.7.0 sin contrato                  | `test_alquiler_antiguo_sin_contrato_solo_cambia_el_estado`                                    |
+| Un contrato activo no se cierra con un cambio de estado suelto | `test_contrato_activo_no_se_salta_con_un_cambio_de_estado_suelto`                             |
+| Venta = ingreso + estado                                       | `test_vender_registra_el_ingreso_y_el_estado`, `test_venta_sin_precio_no_cambia_nada`         |
+| Nunca dos contratos activos (defensa en profundidad)           | `test_el_esquema_impide_dos_contratos_activos`                                                |
+
+**Recorridos de interfaz:** alquilar y devolver desde el inventario (con
+liquidación, cobro y horas de uso), y cobrar y anular desde la ficha.
+
+**Migración:** se verificó la migración 004 sobre una base real de la versión
+0.6.0 con plantas alquiladas sin contrato: se creó el respaldo automático y esas
+plantas se devuelven sin liquidación, conservando sus datos históricos.
+
+**Hallazgos corregidos durante el ciclo:**
+
+| Hallazgo                                                                                                                    | Corrección                                                          | Prueba de regresión                               |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------- |
+| El mensaje de error del diálogo de estado se ocultaba solo (el reformateo automático del horómetro disparaba `textChanged`) | Se usa `textEdited`, que solo reacciona a lo que escribe el usuario | `test_alquilar_sin_cliente_ni_tarifa_no_se_envia` |
+| El mensaje final de un cambio de estado no informaba el resultado comercial                                                 | Incluye contrato, liquidación con saldo o valor de la venta         | Revisión del recorrido completo                   |

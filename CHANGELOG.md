@@ -1,5 +1,49 @@
 # Registro de cambios – EnerGest
 
+## [0.7.0] – 2026-10-12
+
+### Agregado
+
+- Contratos de alquiler por día o por mes: al pasar una planta a "Alquilada" se
+  registran el cliente, la modalidad, la tarifa y las observaciones.
+- Liquidación al devolver una planta: se cobra el tiempo real de uso. Por mes,
+  los meses completos de calendario a la tarifa pactada y los días restantes a la
+  tarifa mensual ÷ 30. Mínimo un día. El valor sugerido se puede ajustar si se
+  negocia un descuento.
+- Cobros durante el alquiler (anticipos o cortes mensuales), que se descuentan al
+  liquidar, y cobro del saldo pendiente después de la devolución.
+- Venta con comprador y precio al pasar una planta a "Vendida".
+- Registro de clientes desde los formularios, sin salir del flujo de trabajo.
+- Pestaña "Ingresos" en la ficha: contrato activo con lo acumulado a la fecha,
+  lista de ingresos y historial de alquileres con horas de uso, valor liquidado,
+  cobrado y saldo.
+- Al pasar el mouse sobre una planta alquilada, el inventario muestra el cliente
+  que la tiene.
+
+### Cambiado
+
+- El cambio de estado a "Alquilada" o "Vendida" exige los datos comerciales;
+  al vender, el motivo se completa automáticamente.
+- El mensaje que confirma un cambio de estado incluye el contrato, la liquidación
+  o el valor de la venta.
+
+### Reglas de negocio
+
+- Una planta no puede tener dos contratos activos.
+- Un contrato activo solo se cierra con su liquidación: no con un cambio de estado
+  suelto.
+- El valor liquidado nunca puede ser menor que lo ya cobrado.
+- Las condiciones de un contrato solo se corrigen mientras está activo.
+- Los ingresos se anulan con motivo; no se editan ni se borran.
+- Los alquileres registrados antes de esta versión no tienen contrato: se
+  devuelven sin liquidación y sus cobros se registran como "otro ingreso".
+
+### Base de datos
+
+- Migración 004: clientes, contratos de alquiler, ingresos y vínculo entre las
+  lecturas del horómetro y su contrato. Se aplica automáticamente al abrir la
+  aplicación, con respaldo previo en `data/respaldos/`.
+
 ## [0.6.0] – 2026-10-10
 
 ### Agregado

@@ -13,8 +13,10 @@ import logging
 import sys
 from datetime import date
 
+from src.business.models.comercial import DatosContrato, DatosVenta, ModalidadAlquiler
 from src.business.models.estado_planta import EstadoPlanta
 from src.business.models.planta import DatosPlanta, TipoAceite, TipoCombustible
+from src.business.services.comercial_service import ComercialService
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.services.planta_service import PlantaService
 from src.config import settings
@@ -234,22 +236,37 @@ _CONSUMIBLES_DEMO: dict[str, tuple[str, str, str, str, float, TipoAceite]] = {
     ),
 }
 
-# (posición de la planta en la lista, nuevo estado, motivo, lectura del horómetro)
-_EVENTOS_DEMO: list[tuple[int, EstadoPlanta, str | None, int | None]] = [
-    (1, EstadoPlanta.ALQUILADA, None, 820),
-    (3, EstadoPlanta.ALQUILADA, None, 2075),
-    (5, EstadoPlanta.EN_MANTENIMIENTO, None, None),
-    (2, EstadoPlanta.VENDIDA, "Venta a Constructora del Valle", None),
-    (6, EstadoPlanta.DADA_DE_BAJA, "Motor fundido; reparación no rentable", None),
-    (10, EstadoPlanta.RETIRADA, "Sin demanda; almacenada en bodega", None),
+# Clientes de demostración: (nombre, NIT o cédula, teléfono)
+_CLIENTES_DEMO: list[tuple[str, str, str]] = [
+    ("Constructora del Pacífico S.A.S.", "900.555.111-2", "602 555 1111"),
+    ("Eventos del Valle", "1.130.555.444", "315 000 0000"),
+    ("Agroindustrias del Cauca S.A.S.", "800.222.333-4", "602 555 2222"),
 ]
+
+# Alquileres con contrato: (posición de la planta, cliente, modalidad, tarifa, horómetro)
+_ALQUILERES_DEMO: list[tuple[int, int, ModalidadAlquiler, int, int]] = [
+    (1, 0, ModalidadAlquiler.MES, 3_000_000, 820),
+    (3, 1, ModalidadAlquiler.DIA, 180_000, 2075),
+]
+
+# Otros cambios de estado: (posición de la planta, nuevo estado, motivo)
+_EVENTOS_DEMO: list[tuple[int, EstadoPlanta, str]] = [
+    (5, EstadoPlanta.EN_MANTENIMIENTO, "Revisión del sistema de arranque"),
+    (6, EstadoPlanta.DADA_DE_BAJA, "Motor fundido; reparación no rentable"),
+    (10, EstadoPlanta.RETIRADA, "Sin demanda; almacenada en bodega"),
+]
+
+# Venta con precio: (posición de la planta, cliente, precio, documento)
+_VENTA_DEMO: tuple[int, int, int, str] = (2, 2, 42_000_000, "FV-0102")
 
 
 def main() -> int:
     setup_logging(logging.INFO)
     db = DatabaseManager(get_database_path())
     db.initialize_schema(get_resource_path(settings.SCHEMA_RELATIVE_PATH))
-    servicio = PlantaService(crear_fabrica_uow(db), ConsecutivoService())
+    fabrica = crear_fabrica_uow(db)
+    servicio = PlantaService(fabrica, ConsecutivoService())
+    comercial = ComercialService(fabrica, servicio)
 
     if servicio.listar(incluir_fuera_de_operacion=True):
         print("La base de datos ya tiene plantas; no se cargaron datos de demostración.")
@@ -288,8 +305,15 @@ def main() -> int:
             )
         )
 
-    for posicion, estado, motivo, horometro in _EVENTOS_DEMO:
-        servicio.cambiar_estado(plantas[posicion].id, estado, motivo=motivo, horometro=horometro)
+    # Todo pasa por los servicios: cada dato de ejemplo respeta las mismas reglas.
+    clientes = [comercial.registrar_cliente(*datos) for datos in _CLIENTES_DEMO]
+    for posicion, cliente, modalidad, tarifa, horometro in _ALQUILERES_DEMO:
+        contrato = DatosContrato(clientes[cliente].id, modalidad, tarifa)
+        comercial.alquilar(plantas[posicion].id, contrato, horometro)
+    for posicion, estado, motivo in _EVENTOS_DEMO:
+        servicio.cambiar_estado(plantas[posicion].id, estado, motivo=motivo)
+    posicion, cliente, precio, documento = _VENTA_DEMO
+    comercial.vender(plantas[posicion].id, DatosVenta(clientes[cliente].id, precio, documento))
 
     print(f"Se cargaron {len(plantas)} plantas de demostración en {db.db_path}")
     print(f"Números libres: {servicio.numeros_libres()} | Próximo: {servicio.proximo_numero()}")

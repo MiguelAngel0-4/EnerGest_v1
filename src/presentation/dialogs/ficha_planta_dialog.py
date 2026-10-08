@@ -18,10 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from src.presentation.widgets.gastos_widget import GastosWidget
+from src.presentation.widgets.ingresos_widget import IngresosWidget
 from src.presentation.widgets.mantenimientos_widget import MantenimientosWidget
 from src.presentation.widgets.tabla_texto import FilaTexto, crear_tabla_texto
 
-_PROXIMAMENTE = ("Ingresos", "Balance")
+_PROXIMAMENTE = ("Balance",)
 
 
 class FichaPlantaDialog(QDialog):
@@ -48,6 +49,8 @@ class FichaPlantaDialog(QDialog):
         self._pestanas.addTab(self.gastos, "Gastos")
         self.mantenimientos = MantenimientosWidget()
         self._pestanas.addTab(self.mantenimientos, "Mantenimientos")
+        self.ingresos = IngresosWidget()
+        self._pestanas.addTab(self.ingresos, "Ingresos")
         for nombre in _PROXIMAMENTE:
             indice = self._pestanas.addTab(QWidget(), nombre)
             self._pestanas.setTabEnabled(indice, False)
