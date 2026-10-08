@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Final
 
 from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QBrush, QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -47,6 +47,7 @@ class InventarioView(QWidget):
     registro_solicitado = Signal()
     fila_activada = Signal(QModelIndex)
     numero_consultado = Signal(int)
+    alerta_seleccionada = Signal(int)  # id de la planta
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -132,17 +133,28 @@ class InventarioView(QWidget):
         self._proximo.setObjectName("proximoNumero")
         self._proximo.setWordWrap(True)
 
-        nota = QLabel(
-            "Asignación automática: cada planta nueva recibe el menor número libre."
-        )
+        nota = QLabel("Asignación automática: cada planta nueva recibe el menor número libre.")
         nota.setObjectName("textoSecundario")
         nota.setWordWrap(True)
+
+        titulo_alertas = QLabel("Mantenimientos pendientes")
+        titulo_alertas.setObjectName("tituloPanel")
+        titulo_alertas.setWordWrap(True)  # El panel es angosto: el título usa dos líneas
+        self._lista_alertas = QListWidget()
+        self._lista_alertas.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._lista_alertas.setToolTip(
+            "Haga clic para abrir la ficha en la pestaña Mantenimientos."
+        )
+        self._lista_alertas.setWordWrap(True)
 
         layout = QVBoxLayout(panel)
         layout.addWidget(titulo)
         layout.addWidget(self._lista_numeros, stretch=1)
         layout.addWidget(self._proximo)
         layout.addWidget(nota)
+        layout.addSpacing(8)
+        layout.addWidget(titulo_alertas)
+        layout.addWidget(self._lista_alertas, stretch=1)
         return panel
 
     def _conectar_eventos(self) -> None:
@@ -156,11 +168,17 @@ class InventarioView(QWidget):
             combo.currentIndexChanged.connect(lambda _i: self.filtros_cambiados.emit())
         self._tabla.doubleClicked.connect(self.fila_activada)
         self._lista_numeros.itemClicked.connect(self._al_hacer_clic_en_numero)
+        self._lista_alertas.itemClicked.connect(self._al_hacer_clic_en_alerta)
 
     def _al_hacer_clic_en_numero(self, item: QListWidgetItem) -> None:
         numero = item.data(Qt.ItemDataRole.UserRole)
         if numero is not None:
             self.numero_consultado.emit(int(numero))
+
+    def _al_hacer_clic_en_alerta(self, item: QListWidgetItem) -> None:
+        planta_id = item.data(Qt.ItemDataRole.UserRole)
+        if planta_id is not None:
+            self.alerta_seleccionada.emit(int(planta_id))
 
     # ------------------------------------------------------------------ #
     # API pública: lo que el controlador le pide a la vista
@@ -233,6 +251,19 @@ class InventarioView(QWidget):
             vacio.setFlags(Qt.ItemFlag.NoItemFlags)
             self._lista_numeros.addItem(vacio)
         self._proximo.setText(f"Próximo número a asignar: <b>{proximo}</b>")
+
+    def mostrar_alertas(self, alertas: list[tuple[str, int, str]]) -> None:
+        """Muestra (texto, id de planta, color) de cada alerta; vacía, un aviso tranquilo."""
+        self._lista_alertas.clear()
+        for texto, planta_id, color in alertas:
+            item = QListWidgetItem(texto)
+            item.setData(Qt.ItemDataRole.UserRole, planta_id)
+            item.setForeground(QBrush(QColor(color)))
+            self._lista_alertas.addItem(item)
+        if not alertas:
+            vacio = QListWidgetItem("Sin mantenimientos vencidos ni próximos")
+            vacio.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._lista_alertas.addItem(vacio)
 
     def mostrar_resumen(self, texto: str) -> None:
         self._resumen.setText(texto)

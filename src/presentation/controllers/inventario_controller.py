@@ -23,8 +23,10 @@ from PySide6.QtWidgets import QDialog
 
 from src.business.exceptions import NegocioError, ValidacionError
 from src.business.models.estado_planta import EstadoPlanta
+from src.business.models.mantenimiento import AlertaMantenimiento, NivelAlerta
 from src.business.models.planta import Planta, TipoAceite, TipoCombustible
 from src.business.services.hoja_vida_service import HojaVidaService
+from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
 from src.presentation.controllers.ficha_controller import FichaPlantaController
 from src.presentation.controllers.nombres_archivo import nombre_archivo_hoja_vida
@@ -46,6 +48,11 @@ from src.presentation.table_models.plantas_table_model import (
 from src.presentation.views.equipos.inventario_view import InventarioView
 from src.presentation.widgets.acciones_delegate import AccionesDelegate
 from src.shared.formatters import formatear_consecutivo, formatear_entero
+
+_COLOR_ALERTA: Final[dict[NivelAlerta, str]] = {
+    NivelAlerta.VENCIDO: "#C0392B",
+    NivelAlerta.PROXIMO: "#D35400",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +90,7 @@ class InventarioController(QObject):
         parent: QObject | None = None,
         preferencias: QSettings | None = None,
         ficha: FichaPlantaController | None = None,
+        mantenimientos: MantenimientoService | None = None,
     ) -> None:
         """
         Args:
@@ -96,6 +104,7 @@ class InventarioController(QObject):
         self._vista = vista
         self._preferencias = preferencias or QSettings("EnerGest", "EnerGest")
         self._ficha = ficha
+        self._mantenimientos = mantenimientos
         # Planta devuelta por la última operación exitosa de un diálogo.
         self._resultado: Planta | None = None
 
@@ -145,6 +154,9 @@ class InventarioController(QObject):
         self._vista.registro_solicitado.connect(self.abrir_registro)
         self._vista.fila_activada.connect(self._al_activar_fila)
         self._vista.numero_consultado.connect(self.consultar_numero)
+        self._vista.alerta_seleccionada.connect(
+            lambda planta_id: self.ver_ficha(planta_id, "Mantenimientos")
+        )
         self._delegado.accion_solicitada.connect(self._al_solicitar_accion)
 
     # ------------------------------------------------------------------ #
@@ -163,6 +175,7 @@ class InventarioController(QObject):
             self._actualizar_opciones_marca()
             self._aplicar_filtros_locales()
             self._actualizar_panel_numeros()
+            self._actualizar_alertas()
 
     def abrir_registro(self) -> None:
         """Formulario de registro: la planta recibe automáticamente el menor número libre."""
@@ -252,12 +265,13 @@ class InventarioController(QObject):
                     "Estado actualizado", self._resumen_cambio(planta, actualizada)
                 )
 
-    def ver_ficha(self, planta_id: int) -> None:
-        """Abre la ficha de la planta: historial, gastos y (más adelante) finanzas."""
+    def ver_ficha(self, planta_id: int, pestana: str = "Historial") -> None:
+        """Abre la ficha de la planta y, al cerrarla, refresca horómetros y alertas."""
         if self._ficha is None:
             logger.error("No se configuró el controlador de la ficha.")
             return
-        self._ficha.abrir(planta_id)
+        self._ficha.abrir(planta_id, pestana)
+        self.recargar()
 
     def generar_hoja_vida(self, planta_id: int) -> None:
         """Pide dónde guardar, genera el PDF y ofrece abrirlo."""
@@ -501,9 +515,7 @@ class InventarioController(QObject):
         if antes.numero_consecutivo is not None and despues.numero_consecutivo is None:
             texto += f"\nEl número {formatear_consecutivo(antes.numero_consecutivo)} quedó libre."
         elif antes.numero_consecutivo is None and despues.numero_consecutivo is not None:
-            texto += (
-                f"\nRecibió el número {formatear_consecutivo(despues.numero_consecutivo)}."
-            )
+            texto += f"\nRecibió el número {formatear_consecutivo(despues.numero_consecutivo)}."
         if despues.horometro_actual != antes.horometro_actual:
             usadas = despues.horometro_actual - antes.horometro_actual
             texto += (
@@ -541,6 +553,16 @@ class InventarioController(QObject):
         opciones: list[tuple[str, str | None]] = [("Todas las marcas", None)]
         opciones += [(marca, marca) for marca in sorted(marcas.values(), key=str.casefold)]
         self._vista.set_opciones_combo("marca", opciones)
+
+    def _actualizar_alertas(self) -> None:
+        if self._mantenimientos is None:
+            return
+        self._vista.mostrar_alertas(
+            [
+                (_texto_alerta(a), a.planta.id, _COLOR_ALERTA[a.nivel])
+                for a in self._mantenimientos.alertas()
+            ]
+        )
 
     def _actualizar_panel_numeros(self) -> None:
         libres = self._servicio.numeros_libres()
@@ -581,3 +603,25 @@ class InventarioController(QObject):
                 accion,
                 "Ocurrió un error inesperado. Los detalles quedaron registrados en el log.",
             )
+
+
+def _texto_alerta(alerta: AlertaMantenimiento) -> str:
+    """Ej. "PE-004 · Vencido: hace 3 días" o "PE-002 · Próximo: en 20 h"."""
+    partes: list[str] = []
+    if alerta.dias_restantes is not None:
+        dias = alerta.dias_restantes
+        if dias < 0:
+            partes.append(f"hace {-dias} día(s)")
+        elif dias == 0:
+            partes.append("hoy")
+        else:
+            partes.append(f"en {dias} día(s)")
+    if alerta.horas_restantes is not None:
+        horas = alerta.horas_restantes
+        partes.append(
+            f"{formatear_entero(-horas, 'h')} pasado"
+            if horas < 0
+            else f"en {formatear_entero(horas, 'h')}"
+        )
+    numero = formatear_consecutivo(alerta.planta.numero_consecutivo)
+    return f"{numero} · {alerta.nivel.etiqueta}: {' / '.join(partes)}"

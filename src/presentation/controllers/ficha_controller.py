@@ -10,15 +10,22 @@ sub-iteración de la Actividad 4 agregará aquí la lógica de su pestaña.
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
 
 from src.business.exceptions import NegocioError, ValidacionError
 from src.business.models.gasto import DatosFactura, DatosGasto, FacturaProveedor, GastoDetalle
+from src.business.models.mantenimiento import (
+    DatosMantenimiento,
+    LineaInsumo,
+    Mantenimiento,
+    TipoMantenimiento,
+)
 from src.business.models.planta import Planta
 from src.business.services.gasto_service import GastoService
+from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
 from src.presentation.controllers.textos import (
     FORMATO_FECHA,
@@ -33,16 +40,32 @@ from src.presentation.dialogs.gasto_dialogs import (
     OpcionFactura,
     RegistrarGastoDialog,
 )
+from src.presentation.dialogs.mantenimiento_dialog import (
+    InsumoSugerido,
+    RegistrarMantenimientoDialog,
+)
 from src.presentation.widgets.formulario_base import FormularioBase
 from src.presentation.widgets.gastos_widget import FilaGasto
-from src.shared.formatters import formatear_decimal, formatear_moneda
+from src.presentation.widgets.registros_widget import FilaRegistro
+from src.shared.formatters import formatear_decimal, formatear_entero, formatear_moneda
 
 logger = logging.getLogger(__name__)
 
 UNIDADES: Final[list[str]] = ["Unidad", "Galón", "Litro", "Cuarto", "Servicio"]
+TIPOS_MANTENIMIENTO: Final[list[tuple[str, str]]] = [
+    (t.etiqueta, t.value) for t in TipoMantenimiento
+]
 _ERROR_INESPERADO: Final[str] = (
     "Ocurrió un error inesperado. Los detalles quedaron registrados en el log."
 )
+
+
+class _ConFacturas(Protocol):
+    """Formulario que ofrece facturas (el de gasto o el de mantenimiento)."""
+
+    def set_facturas(
+        self, facturas: list[OpcionFactura], seleccionar: int | None = None
+    ) -> None: ...
 
 
 class FichaPlantaController(QObject):
@@ -52,16 +75,28 @@ class FichaPlantaController(QObject):
         self,
         plantas: PlantaService,
         gastos: GastoService,
+        mantenimientos: MantenimientoService,
         ventana_padre: QWidget,
         parent: QObject | None = None,
+        intervalo_meses: int = 6,
+        intervalo_horas: int = 250,
     ) -> None:
+        """
+        Args:
+            intervalo_meses / intervalo_horas: sugerencia del próximo preventivo
+                (en la aplicación vienen de settings.py).
+        """
         super().__init__(parent)
         self._plantas = plantas
         self._gastos = gastos
+        self._mantenimientos = mantenimientos
+        self._intervalo_meses = intervalo_meses
+        self._intervalo_horas = intervalo_horas
         self._ventana_padre = ventana_padre
         self._planta: Planta | None = None
         self._ficha: FichaPlantaDialog | None = None
         self._ver_anulados = False
+        self._ver_mantenimientos_anulados = False
 
     # ------------------------------------------------------------------ #
     # Apertura
@@ -81,16 +116,27 @@ class FichaPlantaController(QObject):
             filas_historial_consecutivos(consecutivos),
             self._ventana_padre,
         )
-        self._planta, self._ficha, self._ver_anulados = planta, ficha, False
+        self._planta, self._ficha = planta, ficha
+        self._ver_anulados = self._ver_mantenimientos_anulados = False
         if planta.estado.es_final:
-            ficha.gastos.deshabilitar_registro(
-                f"La planta está en estado '{planta.estado.etiqueta}': sus gastos se pueden "
-                "consultar y anular, pero no se registran gastos nuevos."
-            )
+            for pestana, que in [
+                (ficha.gastos, "gastos"),
+                (ficha.mantenimientos, "mantenimientos"),
+            ]:
+                pestana.deshabilitar_registro(
+                    f"La planta está en estado '{planta.estado.etiqueta}': sus {que} se pueden "
+                    f"consultar y anular, pero no se registran {que} nuevos."
+                )
         ficha.gastos.registrar_solicitado.connect(self.registrar_gasto)
         ficha.gastos.anular_solicitado.connect(self.anular_gasto)
         ficha.gastos.mostrar_anulados_cambiado.connect(self._cambiar_ver_anulados)
+        ficha.mantenimientos.registrar_solicitado.connect(self.registrar_mantenimiento)
+        ficha.mantenimientos.anular_solicitado.connect(self.anular_mantenimiento)
+        ficha.mantenimientos.mostrar_anulados_cambiado.connect(
+            self._cambiar_ver_mantenimientos_anulados
+        )
         self._recargar_gastos()
+        self._recargar_mantenimientos()
         ficha.mostrar_pestana(pestana)
         ficha.exec()
         ficha.deleteLater()
@@ -134,12 +180,141 @@ class FichaPlantaController(QObject):
             self._recargar_gastos()
 
     # ------------------------------------------------------------------ #
+    # Mantenimientos
+    # ------------------------------------------------------------------ #
+
+    def registrar_mantenimiento(self) -> None:
+        if self._planta is None or self._ficha is None:
+            return
+        with self._capturar_errores("Registrar mantenimiento", self._ficha.mantenimientos):
+            planta = self._plantas.obtener(self._planta.id)  # Horómetro al día
+            dialogo = RegistrarMantenimientoDialog(
+                describir_planta(planta),
+                formatear_entero(planta.horometro_actual, "h"),
+                TIPOS_MANTENIMIENTO,
+                self._mantenimientos.tecnicos(),
+                [(c.nombre, c.id) for c in self._gastos.listar_categorias()],
+                self._insumos_de_la_ficha(planta),
+                UNIDADES,
+                sugeridor=lambda fecha, horas: self._mantenimientos.proximo_sugerido(
+                    fecha, horas, self._intervalo_meses, self._intervalo_horas
+                ),
+                parent=self._ficha,
+            )
+            dialogo.set_facturas(self._opciones_facturas())
+            dialogo.nueva_factura_solicitada.connect(lambda: self._crear_factura(dialogo))
+            dialogo.guardar_solicitado.connect(
+                lambda valores: self._guardar(dialogo, lambda: self._registrar_mant(valores))
+            )
+            if self._ejecutar(dialogo):
+                self._recargar_mantenimientos()
+                self._recargar_gastos()  # Sus insumos aparecen también como gastos
+
+    def anular_mantenimiento(self, mantenimiento_id: int) -> None:
+        if self._ficha is None:
+            return
+        vista = self._ficha.mantenimientos
+        motivo = vista.pedir_motivo(
+            "Anular mantenimiento",
+            "Motivo de la anulación (también se anularán sus gastos y su lectura dejará "
+            "de contar):",
+        )
+        if motivo is None:
+            return
+        with self._capturar_errores("Anular mantenimiento", vista):
+            self._mantenimientos.anular(mantenimiento_id, motivo)
+            self._recargar_mantenimientos()
+            self._recargar_gastos()
+
+    def _registrar_mant(self, valores: dict[str, Any]) -> None:
+        if self._planta is None:
+            return
+        self._mantenimientos.registrar(
+            self._planta.id,
+            DatosMantenimiento(
+                fecha=valores["fecha"],
+                tipo=TipoMantenimiento(valores["tipo"]),
+                horometro=valores["horometro"],
+                descripcion=valores["descripcion"],
+                tecnico=valores["tecnico"],
+                proxima_fecha=valores["proxima_fecha"],
+                proximo_horometro=valores["proximo_horometro"],
+            ),
+            [
+                LineaInsumo(
+                    categoria_id=linea["categoria_id"],
+                    descripcion=linea["descripcion"],
+                    valor_total=linea["valor_total"],
+                    cantidad=linea["cantidad"],
+                    unidad=linea["unidad"],
+                )
+                for linea in valores["insumos"]
+            ],
+            valores["factura_id"],
+        )
+
+    def _recargar_mantenimientos(self) -> None:
+        if self._planta is None or self._ficha is None:
+            return
+        vista = self._ficha.mantenimientos
+        with self._capturar_errores("Cargar mantenimientos", vista):
+            lista = self._mantenimientos.listar(self._planta.id, self._ver_mantenimientos_anulados)
+            vista.mostrar_filas([_fila_mantenimiento(m) for m in lista])
+            vigentes = [m for m in lista if not m.anulado]
+            if not vigentes:
+                vista.mostrar_resumen("Esta planta no tiene mantenimientos registrados.")
+                return
+            ultimo = vigentes[0]
+            texto = (
+                f"Último: {ultimo.datos.fecha.strftime(FORMATO_FECHA)} a "
+                f"{formatear_entero(ultimo.datos.horometro, 'h')} "
+                f"({ultimo.datos.tipo.etiqueta.lower()})"
+            )
+            proximo = _texto_proximo(ultimo)
+            if proximo != "—":
+                texto += f" · Próximo: {proximo}"
+            invertido = sum(m.costo_total for m in vigentes)
+            texto += (
+                f" · Invertido: {formatear_moneda(invertido)} en {len(vigentes)} mantenimiento(s)"
+            )
+            vista.mostrar_resumen(texto)
+
+    def _cambiar_ver_mantenimientos_anulados(self, ver: bool) -> None:
+        self._ver_mantenimientos_anulados = ver
+        self._recargar_mantenimientos()
+
+    def _insumos_de_la_ficha(self, planta: Planta) -> list[InsumoSugerido]:
+        """Los filtros y el aceite de la ficha técnica, listos para cargar como líneas."""
+        categorias = {c.nombre: c.id for c in self._gastos.listar_categorias()}
+        datos = planta.datos
+        insumos: list[InsumoSugerido] = []
+        if "Filtros" in categorias:
+            for nombre, referencia in [
+                ("Filtro de aceite", datos.filtro_aceite),
+                ("Filtro de combustible", datos.filtro_combustible),
+                ("Filtro de agua", datos.filtro_agua),
+                ("Filtro de aire", datos.filtro_aire),
+            ]:
+                if referencia:
+                    insumos.append((categorias["Filtros"], f"{nombre} {referencia}", 1.0, "Unidad"))
+        if datos.tipo_aceite and "Aceite y lubricantes" in categorias:
+            insumos.append(
+                (
+                    categorias["Aceite y lubricantes"],
+                    f"Aceite {datos.tipo_aceite.etiqueta}",
+                    datos.cantidad_aceite_gal or 1.0,
+                    "Galón",
+                )
+            )
+        return insumos
+
+    # ------------------------------------------------------------------ #
     # Facturas y proveedores
     # ------------------------------------------------------------------ #
 
-    def _crear_factura(self, dialogo_gasto: RegistrarGastoDialog) -> None:
+    def _crear_factura(self, dialogo_gasto: _ConFacturas) -> None:
         resultado: dict[str, Any] = {}
-        dialogo = NuevaFacturaDialog(dialogo_gasto)
+        dialogo = NuevaFacturaDialog(dialogo_gasto)  # type: ignore[arg-type]
         dialogo.set_proveedores(self._opciones_proveedores())
         dialogo.nuevo_proveedor_solicitado.connect(lambda: self._crear_proveedor(dialogo))
         dialogo.guardar_solicitado.connect(
@@ -293,8 +468,9 @@ class FichaPlantaController(QObject):
         return aceptado
 
     @contextmanager
-    def _capturar_errores(self, accion: str) -> Iterator[None]:
-        vista = self._ficha.gastos if self._ficha is not None else None
+    def _capturar_errores(self, accion: str, vista: Any = None) -> Iterator[None]:
+        if vista is None and self._ficha is not None:
+            vista = self._ficha.gastos
         try:
             yield
         except NegocioError as exc:
@@ -317,14 +493,45 @@ def _fila(detalle: GastoDetalle) -> FilaGasto:
         if detalle.tiene_soporte
         else "Sin soporte"
     )
+    descripcion = datos.descripcion
+    if detalle.mantenimiento_fecha is not None:
+        descripcion += f" (mantenimiento {detalle.mantenimiento_fecha.strftime(FORMATO_FECHA)})"
     return FilaGasto(
         id=gasto.id,
         fecha=datos.fecha.strftime(FORMATO_FECHA),
         categoria=detalle.categoria,
-        descripcion=datos.descripcion,
+        descripcion=descripcion,
         cantidad=cantidad,
         valor=formatear_moneda(datos.valor_total),
         soporte=soporte,
         anulado=gasto.anulado,
         motivo_anulacion=gasto.motivo_anulacion,
+    )
+
+
+def _texto_proximo(mantenimiento: Mantenimiento) -> str:
+    """Ej. "09/04/2027 o 2.325 h" (lo que ocurra primero)."""
+    partes = []
+    if mantenimiento.datos.proxima_fecha:
+        partes.append(mantenimiento.datos.proxima_fecha.strftime(FORMATO_FECHA))
+    if mantenimiento.datos.proximo_horometro:
+        partes.append(formatear_entero(mantenimiento.datos.proximo_horometro, "h"))
+    return " o ".join(partes) or "—"
+
+
+def _fila_mantenimiento(mantenimiento: Mantenimiento) -> FilaRegistro:
+    datos = mantenimiento.datos
+    return FilaRegistro(
+        mantenimiento.id,
+        (
+            datos.fecha.strftime(FORMATO_FECHA),
+            datos.tipo.etiqueta,
+            formatear_entero(datos.horometro, "h"),
+            datos.tecnico or "—",
+            datos.descripcion,
+            formatear_moneda(mantenimiento.costo_total) if mantenimiento.costo_total else "—",
+            _texto_proximo(mantenimiento),
+        ),
+        mantenimiento.anulado,
+        mantenimiento.motivo_anulacion,
     )

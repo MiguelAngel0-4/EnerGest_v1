@@ -69,7 +69,7 @@ def test_contiene_los_datos_principales(tmp_path: Path) -> None:
         "15W-40",
         "1.200 h",
         "No registrado",  # Los filtros de agua y aire no tienen datos
-        "Página 1 de 1",
+        "Página 1 de",  # 1 o 2 páginas según el espacio; lo importante es la numeración
         "EnerGest v0.4.0",
     ]:
         assert esperado in texto, f"Falta '{esperado}' en el PDF"
@@ -95,6 +95,15 @@ def test_caracteres_especiales_no_rompen_el_pdf(tmp_path: Path) -> None:
     rara = replace(PLANTA, datos=datos)
     texto = " ".join(_texto(GeneradorPdfHojaVida().generar(_hoja(rara), tmp_path / "raro.pdf")))
     assert "A&B <Diésel> Ñandú" in texto and "50% & más" in texto
+
+
+def test_las_firmas_nunca_quedan_solas_en_una_pagina(tmp_path: Path) -> None:
+    """Defecto detectado en la revisión visual: la sección 7 empujaba las firmas a otra hoja."""
+    for cambios in (1, 6, 12, 25):
+        paginas = _texto(GeneradorPdfHojaVida().generar(_hoja(cambios=cambios), tmp_path / "f.pdf"))
+        ultima = paginas[-1]
+        assert "Elaborado por" in ultima
+        assert "HISTORIAL DE MANTENIMIENTOS" in ultima  # Acompañadas por la última sección
 
 
 def test_logo_valido_y_logo_danado(tmp_path: Path) -> None:

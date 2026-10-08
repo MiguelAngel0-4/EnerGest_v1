@@ -4,7 +4,6 @@ Pruebas de interfaz del módulo de gastos (ficha, formularios y pestaña).
 Ruta: tests/ui/test_gastos_ui.py
 """
 
-from datetime import date
 
 import pytest
 from PySide6.QtWidgets import QApplication, QWidget
@@ -12,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from src.business.models.planta import DatosPlanta, TipoAceite
 from src.business.services.consecutivo_service import ConsecutivoService
 from src.business.services.gasto_service import GastoService
+from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
 from src.presentation.controllers.ficha_controller import FichaPlantaController
 from src.presentation.dialogs.ficha_planta_dialog import FichaPlantaDialog
@@ -67,10 +67,10 @@ def test_con_factura_sin_elegir_muestra_error_y_no_envia(qapp: QApplication) -> 
 def test_sin_factura_envia_factura_vacia(qapp: QApplication) -> None:
     dialogo = _dialogo_gasto()
     emitidos = _emitidos(dialogo)
-    dialogo._sin_factura.setChecked(True)
+    dialogo._soporte.usar_sin_factura()
     dialogo._al_guardar()
     assert emitidos[0]["factura_id"] is None
-    assert not dialogo._factura.isEnabled()
+    assert not dialogo._soporte.combo.isEnabled()
 
 
 def test_factura_seleccionada_muestra_su_saldo(qapp: QApplication) -> None:
@@ -79,7 +79,7 @@ def test_factura_seleccionada_muestra_su_saldo(qapp: QApplication) -> None:
         [OpcionFactura(7, "FE-0042 · Filtros del Valle", "$ 120.000")], seleccionar=7
     )
     assert dialogo.valores()["factura_id"] == 7
-    assert "$ 120.000" in dialogo._saldo.text()
+    assert "$ 120.000" in dialogo._soporte.texto_saldo()
 
 
 def test_sugerencias_cambian_con_la_categoria(qapp: QApplication) -> None:
@@ -131,11 +131,13 @@ def test_gasto_anulado_se_ve_tachado(qapp: QApplication) -> None:
 
 @pytest.fixture
 def ficha(qapp: QApplication) -> tuple[FichaPlantaController, PlantaService, GastoService]:
+    # Reloj real: el formulario de gasto propone la fecha de hoy del computador.
     almacen = AlmacenFake()
     fabrica = lambda: FakeUnidadDeTrabajo(almacen)  # noqa: E731
-    plantas = PlantaService(fabrica, ConsecutivoService(), lambda: date(2026, 10, 9))
-    gastos = GastoService(fabrica, lambda: date(2026, 10, 9))
-    return FichaPlantaController(plantas, gastos, QWidget()), plantas, gastos
+    plantas = PlantaService(fabrica, ConsecutivoService())
+    gastos = GastoService(fabrica)
+    mantenimientos = MantenimientoService(fabrica)
+    return FichaPlantaController(plantas, gastos, mantenimientos, QWidget()), plantas, gastos
 
 
 def test_registrar_y_anular_desde_la_ficha(ficha, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,7 +159,7 @@ def test_registrar_y_anular_desde_la_ficha(ficha, monkeypatch: pytest.MonkeyPatc
             dialogo._descripcion.itemText(i) for i in range(dialogo._descripcion.count())
         ]
         dialogo._descripcion.setCurrentIndex(0)
-        dialogo._sin_factura.setChecked(True)
+        dialogo._soporte.usar_sin_factura()
         escribir_como_usuario(dialogo._valor, "45000")
         dialogo._al_guardar()
         return dialogo.result()

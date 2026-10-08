@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from src.business.models.mantenimiento import Mantenimiento
 from src.business.models.planta import CambioEstado, Planta, RegistroConsecutivo
 
 
@@ -37,6 +38,8 @@ class HojaDeVida:
     empresa: DatosEmpresa
     generado_en: datetime
     version_app: str
+    # Mantenimientos vigentes, del más antiguo al más reciente (Actividad 4.2)
+    mantenimientos: tuple[Mantenimiento, ...] = ()
 
     @property
     def ultimo_numero(self) -> int | None:
