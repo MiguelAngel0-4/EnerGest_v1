@@ -263,3 +263,14 @@ QTabBar::tab:selected {
     color: #FFFFFF;
     font-weight: bold;
 }
+
+/* Pestañas aún no disponibles (se habilitan en próximas versiones) */
+QTabBar::tab:disabled {
+    background-color: #F1F3F5;
+    color: #A0A9B2;
+}
+
+/* Opciones y casillas dentro de diálogos: sin fondo propio */
+QDialog QRadioButton, QDialog QCheckBox {
+    background-color: transparent;
+}

@@ -16,6 +16,7 @@ import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.business.services.consecutivo_service import ConsecutivoService
+from src.business.services.gasto_service import GastoService
 from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.planta_service import PlantaService
 from src.config import settings
@@ -25,6 +26,7 @@ from src.infrastructure.database.exceptions import DatabaseError
 from src.infrastructure.reports.pdf_hoja_vida import GeneradorPdfHojaVida
 from src.infrastructure.repositories.empresa_json_repository import EmpresaJsonRepository
 from src.infrastructure.repositories.sqlite_unidad_de_trabajo import crear_fabrica_uow
+from src.presentation.controllers.ficha_controller import FichaPlantaController
 from src.presentation.controllers.inventario_controller import InventarioController
 from src.presentation.views.equipos.inventario_view import InventarioView
 from src.presentation.views.main_window import MainWindow
@@ -93,13 +95,21 @@ def main() -> int:
     servicio_hojas_vida = HojaVidaService(
         fabrica_uow, GeneradorPdfHojaVida(), empresa.obtener, settings.APP_VERSION
     )
+    servicio_gastos = GastoService(fabrica_uow)
 
     # --- Capa de presentación --------------------------------------------
     ventana = MainWindow(settings.APP_NAME, settings.APP_VERSION)
     vista_inventario = InventarioView()
     ventana.agregar_vista("inventario", vista_inventario)
+    controlador_ficha = FichaPlantaController(
+        servicio_plantas, servicio_gastos, vista_inventario, ventana
+    )
     controlador_inventario = InventarioController(
-        servicio_plantas, servicio_hojas_vida, vista_inventario, ventana
+        servicio_plantas,
+        servicio_hojas_vida,
+        vista_inventario,
+        ventana,
+        ficha=controlador_ficha,
     )
 
     ventana.registro_solicitado.connect(controlador_inventario.abrir_registro)

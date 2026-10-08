@@ -26,10 +26,11 @@ from src.business.models.estado_planta import EstadoPlanta
 from src.business.models.planta import Planta, TipoAceite, TipoCombustible
 from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.planta_service import PlantaService
+from src.presentation.controllers.ficha_controller import FichaPlantaController
 from src.presentation.controllers.nombres_archivo import nombre_archivo_hoja_vida
 from src.presentation.controllers.planta_form_mapper import datos_a_valores, valores_a_datos
+from src.presentation.controllers.textos import describir_planta
 from src.presentation.dialogs.cambiar_estado_dialog import CambiarEstadoDialog, OpcionEstado
-from src.presentation.dialogs.historial_planta_dialog import HistorialPlantaDialog
 from src.presentation.dialogs.planta_form_dialog import (
     CAMPOS_FILTROS,
     OpcionesFormulario,
@@ -59,12 +60,11 @@ _OPCIONES_FASES: Final[list[tuple[str, int | None]]] = [
     ("Monofásica (1)", 1),
     ("Trifásica (3)", 3),
 ]
-_FORMATO_FECHA: Final[str] = "%d/%m/%Y"
 
 _ACCIONES: Final[list[tuple[str, str]]] = [
     ("editar", "Editar"),
     ("estado", "Estado"),
-    ("historial", "Historial"),
+    ("ficha", "Ficha"),  # Historial y gastos (antes "Historial")
     ("pdf", "PDF"),
 ]
 
@@ -82,6 +82,7 @@ class InventarioController(QObject):
         vista: InventarioView,
         parent: QObject | None = None,
         preferencias: QSettings | None = None,
+        ficha: FichaPlantaController | None = None,
     ) -> None:
         """
         Args:
@@ -94,6 +95,7 @@ class InventarioController(QObject):
         self._hojas_vida = hojas_vida
         self._vista = vista
         self._preferencias = preferencias or QSettings("EnerGest", "EnerGest")
+        self._ficha = ficha
         # Planta devuelta por la última operación exitosa de un diálogo.
         self._resultado: Planta | None = None
 
@@ -250,38 +252,12 @@ class InventarioController(QObject):
                     "Estado actualizado", self._resumen_cambio(planta, actualizada)
                 )
 
-    def ver_historial(self, planta_id: int) -> None:
-        """Muestra la línea de tiempo de estados y de números consecutivos."""
-        with self._capturar_errores("Ver historial"):
-            planta = self._servicio.obtener(planta_id)
-            cambios, consecutivos = self._servicio.historial(planta_id)
-            filas_estados = [
-                (
-                    c.fecha.strftime(_FORMATO_FECHA),
-                    c.estado_anterior.etiqueta if c.estado_anterior else "— (registro)",
-                    c.estado_nuevo.etiqueta,
-                    formatear_entero(c.horometro, "h") if c.horometro is not None else "",
-                    c.motivo or "",
-                )
-                for c in cambios
-            ]
-            filas_consecutivos = [
-                (
-                    formatear_consecutivo(r.numero),
-                    r.fecha_asignacion.strftime(_FORMATO_FECHA),
-                    (
-                        r.fecha_liberacion.strftime(_FORMATO_FECHA)
-                        if r.fecha_liberacion
-                        else "Vigente"
-                    ),
-                    r.motivo_liberacion or "",
-                )
-                for r in consecutivos
-            ]
-            dialogo = HistorialPlantaDialog(
-                self._describir(planta), filas_estados, filas_consecutivos, self._vista
-            )
-            self._ejecutar(dialogo)
+    def ver_ficha(self, planta_id: int) -> None:
+        """Abre la ficha de la planta: historial, gastos y (más adelante) finanzas."""
+        if self._ficha is None:
+            logger.error("No se configuró el controlador de la ficha.")
+            return
+        self._ficha.abrir(planta_id)
 
     def generar_hoja_vida(self, planta_id: int) -> None:
         """Pide dónde guardar, genera el PDF y ofrece abrirlo."""
@@ -493,14 +469,8 @@ class InventarioController(QObject):
 
     @staticmethod
     def _describir(planta: Planta) -> str:
-        """Ej. "PE-005 · Cummins C50D6"."""
-        numero = (
-            formatear_consecutivo(planta.numero_consecutivo)
-            if planta.numero_consecutivo is not None
-            else "Sin número"
-        )
-        nombre = " ".join(filter(None, [planta.datos.marca, planta.datos.modelo]))
-        return f"{numero} · {nombre}"
+        """Ej. "PE-005 · Cummins C50D6" (texto compartido con la ficha)."""
+        return describir_planta(planta)
 
     @staticmethod
     def _aviso_transicion(planta: Planta, destino: EstadoPlanta) -> str:
@@ -583,7 +553,7 @@ class InventarioController(QObject):
         manejadores = {
             "editar": self.editar,
             "estado": self.cambiar_estado,
-            "historial": self.ver_historial,
+            "ficha": self.ver_ficha,
             "pdf": self.generar_hoja_vida,
         }
         manejadores[accion](planta_id)
