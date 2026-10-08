@@ -15,15 +15,18 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
+from pathlib import Path
 from typing import Any, Final
 
-from PySide6.QtCore import QModelIndex, QObject
+from PySide6.QtCore import QModelIndex, QObject, QSettings, QStandardPaths
 from PySide6.QtWidgets import QDialog
 
 from src.business.exceptions import NegocioError, ValidacionError
 from src.business.models.estado_planta import EstadoPlanta
 from src.business.models.planta import Planta, TipoAceite, TipoCombustible
+from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.planta_service import PlantaService
+from src.presentation.controllers.nombres_archivo import nombre_archivo_hoja_vida
 from src.presentation.controllers.planta_form_mapper import datos_a_valores, valores_a_datos
 from src.presentation.dialogs.cambiar_estado_dialog import CambiarEstadoDialog, OpcionEstado
 from src.presentation.dialogs.historial_planta_dialog import HistorialPlantaDialog
@@ -62,18 +65,35 @@ _ACCIONES: Final[list[tuple[str, str]]] = [
     ("editar", "Editar"),
     ("estado", "Estado"),
     ("historial", "Historial"),
+    ("pdf", "PDF"),
 ]
+
+# Preferencia del usuario: última carpeta donde guardó una hoja de vida.
+_CLAVE_CARPETA_HOJAS: Final[str] = "hojas_vida/carpeta"
 
 
 class InventarioController(QObject):
     """Coordina la vista de inventario con el servicio de plantas."""
 
     def __init__(
-        self, servicio: PlantaService, vista: InventarioView, parent: QObject | None = None
+        self,
+        servicio: PlantaService,
+        hojas_vida: HojaVidaService,
+        vista: InventarioView,
+        parent: QObject | None = None,
+        preferencias: QSettings | None = None,
     ) -> None:
+        """
+        Args:
+            preferencias: Dónde recordar ajustes del usuario (por ejemplo, la última
+                carpeta usada). Por defecto, el registro de Windows del usuario;
+                las pruebas usan un archivo temporal para no tocar el registro.
+        """
         super().__init__(parent)
         self._servicio = servicio
+        self._hojas_vida = hojas_vida
         self._vista = vista
+        self._preferencias = preferencias or QSettings("EnerGest", "EnerGest")
         # Planta devuelta por la última operación exitosa de un diálogo.
         self._resultado: Planta | None = None
 
@@ -86,10 +106,10 @@ class InventarioController(QObject):
             self._proxy,
             anchos_fijos={
                 Columna.CONSECUTIVO: 100,
-                Columna.POTENCIA: 80,
-                Columna.SERIAL: 100,
+                Columna.POTENCIA: 75,
+                Columna.SERIAL: 90,
                 Columna.HOROMETRO: 95,
-                Columna.ESTADO: 150,
+                Columna.ESTADO: 145,
                 Columna.ACCIONES: self._delegado.ancho_requerido(),
             },
             columnas_flexibles=[Columna.MARCA, Columna.MODELO],
@@ -263,6 +283,45 @@ class InventarioController(QObject):
             )
             self._ejecutar(dialogo)
 
+    def generar_hoja_vida(self, planta_id: int) -> None:
+        """Pide dónde guardar, genera el PDF y ofrece abrirlo."""
+        with self._capturar_errores("Generar hoja de vida"):
+            planta = self._servicio.obtener(planta_id)
+            numero = planta.numero_consecutivo
+            if numero is None:  # Planta fuera de operación: se usa el último número que tuvo
+                _, consecutivos = self._servicio.historial(planta_id)
+                numero = consecutivos[-1].numero if consecutivos else None
+            nombre = nombre_archivo_hoja_vida(
+                formatear_consecutivo(numero) if numero is not None else "SIN-NUMERO",
+                planta.datos.marca,
+                planta.datos.modelo,
+                date.today(),
+            )
+
+            destino = self._vista.pedir_ruta_guardado(
+                "Guardar hoja de vida",
+                self._carpeta_hojas_vida() / nombre,
+                "Documentos PDF (*.pdf)",
+            )
+            if destino is None:
+                return  # El usuario canceló
+            if destino.suffix.lower() != ".pdf":
+                destino = destino.with_name(destino.name + ".pdf")
+
+            with self._vista.cursor_espera():
+                ruta = self._hojas_vida.exportar(planta_id, destino)
+            self._preferencias.setValue(_CLAVE_CARPETA_HOJAS, str(ruta.parent))
+
+            eleccion = self._vista.preguntar_tras_generar(
+                "Hoja de vida generada", f"{self._describir(planta)}\n\nSe guardó en:\n{ruta}"
+            )
+            objetivo = {"abrir": ruta, "carpeta": ruta.parent}.get(eleccion)
+            if objetivo is not None and not self._vista.abrir_ruta(objetivo):
+                self._vista.mostrar_info(
+                    "No se pudo abrir",
+                    f"Windows no encontró un programa para abrir:\n{objetivo}",
+                )
+
     def consultar_numero(self, numero: int) -> None:
         """Muestra qué plantas han tenido un número consecutivo."""
         etiqueta = formatear_consecutivo(numero)
@@ -404,6 +463,27 @@ class InventarioController(QObject):
             return
         dialogo.accept()
 
+    def _carpeta_hojas_vida(self) -> Path:
+        """
+        Última carpeta usada o, la primera vez, Documentos/EnerGest/Hojas de vida.
+
+        QStandardPaths encuentra la carpeta Documentos real del usuario, aunque
+        Windows la haya movido (por ejemplo, a OneDrive).
+        """
+        guardada = self._preferencias.value(_CLAVE_CARPETA_HOJAS)
+        if guardada and Path(str(guardada)).is_dir():
+            return Path(str(guardada))
+        documentos = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        carpeta = Path(documentos or Path.home()) / "EnerGest" / "Hojas de vida"
+        try:
+            carpeta.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.warning("No se pudo crear %s; se usa la carpeta personal.", carpeta)
+            return Path.home()
+        return carpeta
+
     def _ejecutar(self, dialogo: QDialog) -> bool:
         """Abre un diálogo modal, lo libera de memoria al cerrarse e indica si se aceptó."""
         self._resultado = None
@@ -504,6 +584,7 @@ class InventarioController(QObject):
             "editar": self.editar,
             "estado": self.cambiar_estado,
             "historial": self.ver_historial,
+            "pdf": self.generar_hoja_vida,
         }
         manejadores[accion](planta_id)
 
