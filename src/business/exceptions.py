@@ -37,6 +37,10 @@ class PlantaNoEncontradaError(NegocioError):
         super().__init__(f"No existe una planta con id {planta_id}.")
 
 
+class RegistroNoEncontradoError(NegocioError):
+    """No existe el registro solicitado (gasto, factura, proveedor...)."""
+
+
 class TransicionInvalidaError(NegocioError):
     """El cambio de estado solicitado no está permitido."""
 

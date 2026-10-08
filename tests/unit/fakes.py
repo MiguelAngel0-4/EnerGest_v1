@@ -15,6 +15,16 @@ from types import TracebackType
 from typing import Self
 
 from src.business.models.estado_planta import EstadoPlanta
+from src.business.models.gasto import (
+    CategoriaGasto,
+    DatosFactura,
+    DatosGasto,
+    FacturaProveedor,
+    Gasto,
+    GastoDetalle,
+    Proveedor,
+    ResumenGastos,
+)
 from src.business.models.planta import CambioEstado, DatosPlanta, Planta, RegistroConsecutivo
 
 FECHA_REGISTRO_FIJA = datetime(2026, 1, 1, 8, 0, 0)
@@ -28,6 +38,23 @@ class AlmacenFake:
     consecutivos: list[RegistroConsecutivo] = field(default_factory=list)
     cambios: list[CambioEstado] = field(default_factory=list)
     siguiente_id: int = 1
+    # Módulo de gastos
+    gastos: dict[int, Gasto] = field(default_factory=dict)
+    facturas: dict[int, tuple[DatosFactura, int]] = field(default_factory=dict)  # (datos, id)
+    proveedores: dict[int, Proveedor] = field(default_factory=dict)
+    categorias: dict[int, CategoriaGasto] = field(
+        default_factory=lambda: {
+            i: CategoriaGasto(i, nombre)
+            for i, nombre in enumerate(
+                ["Filtros", "Repuestos", "Aceite y lubricantes", "Mano de obra", "Otros"], 1
+            )
+        }
+    )
+    contador: int = 1000  # Ids de gastos, facturas y proveedores
+
+    def nuevo_id(self) -> int:
+        self.contador += 1
+        return self.contador
 
 
 class FakePlantaRepository:
@@ -61,9 +88,7 @@ class FakePlantaRepository:
             for c in self._a.cambios
             if c.planta_id == planta.id and c.horometro is not None
         ]
-        return replace(
-            planta, horometro_actual=max([planta.datos.horometro_inicial, *lecturas])
-        )
+        return replace(planta, horometro_actual=max([planta.datos.horometro_inicial, *lecturas]))
 
     def listar(
         self, estados: set[EstadoPlanta] | None = None, texto: str | None = None
@@ -76,7 +101,8 @@ class FakePlantaRepository:
             resultado = [
                 p
                 for p in resultado
-                if t in " ".join(
+                if t
+                in " ".join(
                     filter(None, [p.datos.marca, p.datos.modelo, p.datos.numero_serie])
                 ).lower()
             ]
@@ -131,6 +157,144 @@ class FakeHistorialEstadoRepository:
         return [c for c in self._a.cambios if c.planta_id == planta_id]
 
 
+class FakeGastoRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def insertar(
+        self, planta_id: int, datos: DatosGasto, mantenimiento_id: int | None = None
+    ) -> int:
+        gasto_id = self._a.nuevo_id()
+        self._a.gastos[gasto_id] = Gasto(
+            gasto_id, planta_id, datos, mantenimiento_id, False, None, FECHA_REGISTRO_FIJA
+        )
+        return gasto_id
+
+    def obtener(self, gasto_id: int) -> Gasto | None:
+        return self._a.gastos.get(gasto_id)
+
+    def anular(self, gasto_id: int, motivo: str) -> None:
+        self._a.gastos[gasto_id] = replace(
+            self._a.gastos[gasto_id], anulado=True, motivo_anulacion=motivo
+        )
+
+    def listar_por_planta(
+        self, planta_id: int, incluir_anulados: bool = False
+    ) -> list[GastoDetalle]:
+        gastos = [
+            g
+            for g in self._a.gastos.values()
+            if g.planta_id == planta_id and (incluir_anulados or not g.anulado)
+        ]
+        gastos.sort(key=lambda g: (g.datos.fecha, g.id), reverse=True)
+        detalles = []
+        for g in gastos:
+            factura = self._a.facturas.get(g.datos.factura_id) if g.datos.factura_id else None
+            proveedor = self._a.proveedores[factura[0].proveedor_id].nombre if factura else None
+            detalles.append(
+                GastoDetalle(
+                    g,
+                    self._a.categorias[g.datos.categoria_id].nombre,
+                    factura[0].numero_factura if factura else None,
+                    proveedor,
+                )
+            )
+        return detalles
+
+    def resumen_por_planta(self, planta_id: int) -> ResumenGastos:
+        vigentes = [g for g in self.listar_por_planta(planta_id)]
+        por_categoria: dict[str, int] = {}
+        for d in vigentes:
+            por_categoria[d.categoria] = (
+                por_categoria.get(d.categoria, 0) + d.gasto.datos.valor_total
+            )
+        return ResumenGastos(
+            total=sum(d.gasto.datos.valor_total for d in vigentes),
+            cantidad=len(vigentes),
+            sin_soporte=sum(d.gasto.datos.valor_total for d in vigentes if not d.tiene_soporte),
+            por_categoria=tuple(sorted(por_categoria.items(), key=lambda par: (-par[1], par[0]))),
+        )
+
+
+class FakeFacturaRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def insertar(self, datos: DatosFactura) -> int:
+        factura_id = self._a.nuevo_id()
+        self._a.facturas[factura_id] = (datos, factura_id)
+        return factura_id
+
+    def obtener(self, factura_id: int) -> FacturaProveedor | None:
+        if factura_id not in self._a.facturas:
+            return None
+        datos, _ = self._a.facturas[factura_id]
+        asignado = sum(
+            g.datos.valor_total
+            for g in self._a.gastos.values()
+            if g.datos.factura_id == factura_id and not g.anulado
+        )
+        nombre = self._a.proveedores[datos.proveedor_id].nombre
+        return FacturaProveedor(factura_id, datos, nombre, asignado)
+
+    def existe_numero(self, proveedor_id: int, numero: str) -> bool:
+        return any(
+            d.proveedor_id == proveedor_id
+            and d.numero_factura.strip().casefold() == numero.strip().casefold()
+            for d, _ in self._a.facturas.values()
+        )
+
+    def listar_con_saldo(self, texto: str | None = None) -> list[FacturaProveedor]:
+        facturas = [self.obtener(i) for i in self._a.facturas]
+        resultado = [f for f in facturas if f is not None and f.saldo_por_asignar > 0]
+        if texto:
+            t = texto.casefold()
+            resultado = [
+                f
+                for f in resultado
+                if t in f.datos.numero_factura.casefold() or t in f.proveedor_nombre.casefold()
+            ]
+        return resultado
+
+
+class FakeProveedorRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def insertar(self, nombre: str, nit: str | None, telefono: str | None) -> int:
+        proveedor_id = self._a.nuevo_id()
+        self._a.proveedores[proveedor_id] = Proveedor(proveedor_id, nombre, nit, telefono)
+        return proveedor_id
+
+    def obtener(self, proveedor_id: int) -> Proveedor | None:
+        return self._a.proveedores.get(proveedor_id)
+
+    def listar(self) -> list[Proveedor]:
+        activos = [p for p in self._a.proveedores.values() if p.activo]
+        return sorted(activos, key=lambda p: p.nombre.casefold())
+
+    def existe_nombre(self, nombre: str) -> bool:
+        objetivo = nombre.strip().casefold()
+        return any(p.nombre.strip().casefold() == objetivo for p in self._a.proveedores.values())
+
+    def existe_nit(self, nit: str) -> bool:
+        objetivo = nit.strip().casefold()
+        return any(
+            (p.nit or "").strip().casefold() == objetivo for p in self._a.proveedores.values()
+        )
+
+
+class FakeCategoriaRepository:
+    def __init__(self, almacen: AlmacenFake) -> None:
+        self._a = almacen
+
+    def obtener(self, categoria_id: int) -> CategoriaGasto | None:
+        return self._a.categorias.get(categoria_id)
+
+    def listar(self) -> list[CategoriaGasto]:
+        return [c for c in self._a.categorias.values() if c.activo]
+
+
 class FakeUnidadDeTrabajo:
     """Simula la transacción: si hay error, restaura la copia tomada al entrar."""
 
@@ -140,6 +304,10 @@ class FakeUnidadDeTrabajo:
         self.plantas = FakePlantaRepository(almacen)
         self.consecutivos = FakeConsecutivoRepository(almacen)
         self.historial_estados = FakeHistorialEstadoRepository(almacen)
+        self.gastos = FakeGastoRepository(almacen)
+        self.facturas = FakeFacturaRepository(almacen)
+        self.proveedores = FakeProveedorRepository(almacen)
+        self.categorias = FakeCategoriaRepository(almacen)
 
     def __enter__(self) -> Self:
         self._respaldo = copy.deepcopy(vars(self._almacen))
