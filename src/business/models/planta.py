@@ -117,3 +117,4 @@ class CambioEstado:
     fecha: date
     motivo: str | None = None
     horometro: int | None = None  # Lectura del horómetro al momento del cambio
+    alquiler_id: int | None = None  # Contrato al que pertenece (salida o regreso)

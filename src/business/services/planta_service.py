@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import date
 
 from src.business.exceptions import (
+    NegocioError,
     PlantaNoEncontradaError,
     TransicionInvalidaError,
     ValidacionError,
@@ -136,6 +137,39 @@ class PlantaService:
         Raises:
             PlantaNoEncontradaError, TransicionInvalidaError, ValidacionError
         """
+        with self._uow_factory() as uow:
+            # Un contrato activo se cierra con su liquidación: la devolución de un
+            # alquiler pasa por ComercialService, nunca por un cambio de estado suelto.
+            planta = self._obtener_o_fallar(uow, planta_id)
+            if planta.estado is EstadoPlanta.ALQUILADA and uow.alquileres.activo_de(planta_id):
+                raise NegocioError(
+                    "Esta planta tiene un contrato de alquiler activo: registre la "
+                    "devolución para liquidarlo."
+                )
+            planta_actualizada = self.cambiar_estado_en(
+                uow, planta_id, nuevo, motivo, fecha, horometro
+            )
+        return planta_actualizada
+
+    def cambiar_estado_en(
+        self,
+        uow: IUnidadDeTrabajo,
+        planta_id: int,
+        nuevo: EstadoPlanta,
+        motivo: str | None = None,
+        fecha: date | None = None,
+        horometro: int | None = None,
+        alquiler_id: int | None = None,
+    ) -> Planta:
+        """
+        Igual que cambiar_estado, pero dentro de una transacción ya abierta.
+
+        Lo usan otros servicios que deben cambiar el estado JUNTO con sus propios
+        registros, todo o nada (por ejemplo, alquilar = contrato + cambio de estado).
+
+        Args:
+            alquiler_id: Contrato al que pertenece este cambio (liga sus lecturas).
+        """
         hoy = self._hoy()
         fecha_cambio = fecha or hoy
         motivo_limpio = (motivo or "").strip() or None
@@ -155,64 +189,60 @@ class PlantaService:
         if errores:
             raise ValidacionError(errores)
 
-        with self._uow_factory() as uow:
-            planta = self._obtener_o_fallar(uow, planta_id)
-            actual = planta.estado
+        planta = self._obtener_o_fallar(uow, planta_id)
+        actual = planta.estado
 
-            if not actual.puede_pasar_a(nuevo):
-                raise TransicionInvalidaError(actual, nuevo)
+        if not actual.puede_pasar_a(nuevo):
+            raise TransicionInvalidaError(actual, nuevo)
 
-            # Un horómetro es como el odómetro de un carro: solo avanza.
-            if horometro is not None and horometro < planta.horometro_actual:
-                raise ValidacionError(
-                    {
-                        "horometro": (
-                            f"La lectura ({horometro} h) no puede ser menor que la última "
-                            f"registrada ({planta.horometro_actual} h)."
-                        )
-                    }
-                )
-
-            cambios = uow.historial_estados.listar_por_planta(planta_id)
-            if cambios and fecha_cambio < cambios[-1].fecha:
-                raise ValidacionError(
-                    {
-                        "fecha": (
-                            "La fecha no puede ser anterior al último cambio de estado "
-                            f"({cambios[-1].fecha.isoformat()})."
-                        )
-                    }
-                )
-
-            numero = planta.numero_consecutivo
-            if actual.en_operacion and not nuevo.en_operacion:
-                # Sale de operación: libera su número.
-                self._consecutivos.liberar(
-                    uow, planta_id, fecha_cambio, motivo_limpio or nuevo.etiqueta
-                )
-                numero = None
-            elif not actual.en_operacion and nuevo.en_operacion:
-                # Reactivación: recupera su número anterior o el menor libre.
-                numero = self._consecutivos.proponer_para_reactivacion(uow, planta_id)
-                self._consecutivos.registrar_asignacion(uow, planta_id, numero, fecha_cambio)
-
-            uow.plantas.actualizar_estado(planta_id, nuevo, numero)
-            uow.historial_estados.registrar(
-                CambioEstado(
-                    planta_id=planta_id,
-                    estado_anterior=actual,
-                    estado_nuevo=nuevo,
-                    fecha=fecha_cambio,
-                    motivo=motivo_limpio,
-                    horometro=horometro,
-                )
+        # Un horómetro es como el odómetro de un carro: solo avanza.
+        if horometro is not None and horometro < planta.horometro_actual:
+            raise ValidacionError(
+                {
+                    "horometro": (
+                        f"La lectura ({horometro} h) no puede ser menor que la última "
+                        f"registrada ({planta.horometro_actual} h)."
+                    )
+                }
             )
-            planta_actualizada = self._obtener_o_fallar(uow, planta_id)
 
-        logger.info(
-            "Planta id=%s: %s -> %s (consecutivo: %s).", planta_id, actual, nuevo, numero
+        cambios = uow.historial_estados.listar_por_planta(planta_id)
+        if cambios and fecha_cambio < cambios[-1].fecha:
+            raise ValidacionError(
+                {
+                    "fecha": (
+                        "La fecha no puede ser anterior al último cambio de estado "
+                        f"({cambios[-1].fecha.isoformat()})."
+                    )
+                }
+            )
+
+        numero = planta.numero_consecutivo
+        if actual.en_operacion and not nuevo.en_operacion:
+            # Sale de operación: libera su número.
+            self._consecutivos.liberar(
+                uow, planta_id, fecha_cambio, motivo_limpio or nuevo.etiqueta
+            )
+            numero = None
+        elif not actual.en_operacion and nuevo.en_operacion:
+            # Reactivación: recupera su número anterior o el menor libre.
+            numero = self._consecutivos.proponer_para_reactivacion(uow, planta_id)
+            self._consecutivos.registrar_asignacion(uow, planta_id, numero, fecha_cambio)
+
+        uow.plantas.actualizar_estado(planta_id, nuevo, numero)
+        uow.historial_estados.registrar(
+            CambioEstado(
+                planta_id=planta_id,
+                estado_anterior=actual,
+                estado_nuevo=nuevo,
+                fecha=fecha_cambio,
+                motivo=motivo_limpio,
+                horometro=horometro,
+                alquiler_id=alquiler_id,
+            )
         )
-        return planta_actualizada
+        logger.info("Planta id=%s: %s -> %s (consecutivo: %s).", planta_id, actual, nuevo, numero)
+        return self._obtener_o_fallar(uow, planta_id)
 
     # ------------------------------------------------------------------ #
     # Consultas (solo leen datos)
@@ -243,9 +273,7 @@ class PlantaService:
         with self._uow_factory() as uow:
             return uow.plantas.listar(estados, texto_limpio)
 
-    def historial(
-        self, planta_id: int
-    ) -> tuple[list[CambioEstado], list[RegistroConsecutivo]]:
+    def historial(self, planta_id: int) -> tuple[list[CambioEstado], list[RegistroConsecutivo]]:
         """
         Línea de tiempo de estados y de consecutivos de una planta.
 

@@ -12,7 +12,7 @@ el lenguaje de la interfaz y el de los servicios.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -22,17 +22,24 @@ from PySide6.QtCore import QModelIndex, QObject, QSettings, QStandardPaths
 from PySide6.QtWidgets import QDialog
 
 from src.business.exceptions import NegocioError, ValidacionError
+from src.business.models.comercial import DatosContrato, DatosVenta, ModalidadAlquiler
 from src.business.models.estado_planta import EstadoPlanta
 from src.business.models.mantenimiento import AlertaMantenimiento, NivelAlerta
 from src.business.models.planta import Planta, TipoAceite, TipoCombustible
+from src.business.services.comercial_service import ComercialService
 from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
+from src.presentation.controllers.clientes import crear_cliente_desde, opciones_clientes
 from src.presentation.controllers.ficha_controller import FichaPlantaController
 from src.presentation.controllers.nombres_archivo import nombre_archivo_hoja_vida
 from src.presentation.controllers.planta_form_mapper import datos_a_valores, valores_a_datos
-from src.presentation.controllers.textos import describir_planta
-from src.presentation.dialogs.cambiar_estado_dialog import CambiarEstadoDialog, OpcionEstado
+from src.presentation.controllers.textos import describir_planta, texto_liquidacion
+from src.presentation.dialogs.cambiar_estado_dialog import (
+    CambiarEstadoDialog,
+    OpcionEstado,
+    VistaLiquidacion,
+)
 from src.presentation.dialogs.planta_form_dialog import (
     CAMPOS_FILTROS,
     OpcionesFormulario,
@@ -47,7 +54,7 @@ from src.presentation.table_models.plantas_table_model import (
 )
 from src.presentation.views.equipos.inventario_view import InventarioView
 from src.presentation.widgets.acciones_delegate import AccionesDelegate
-from src.shared.formatters import formatear_consecutivo, formatear_entero
+from src.shared.formatters import formatear_consecutivo, formatear_entero, formatear_moneda
 
 _COLOR_ALERTA: Final[dict[NivelAlerta, str]] = {
     NivelAlerta.VENCIDO: "#C0392B",
@@ -91,6 +98,7 @@ class InventarioController(QObject):
         preferencias: QSettings | None = None,
         ficha: FichaPlantaController | None = None,
         mantenimientos: MantenimientoService | None = None,
+        comercial: ComercialService | None = None,
     ) -> None:
         """
         Args:
@@ -105,6 +113,8 @@ class InventarioController(QObject):
         self._preferencias = preferencias or QSettings("EnerGest", "EnerGest")
         self._ficha = ficha
         self._mantenimientos = mantenimientos
+        self._comercial = comercial
+        self._mensaje_comercial = ""
         # Planta devuelta por la última operación exitosa de un diálogo.
         self._resultado: Planta | None = None
 
@@ -172,6 +182,8 @@ class InventarioController(QObject):
                 incluir_fuera_de_operacion=True, texto=self._vista.texto_busqueda()
             )
             self._modelo.cargar(plantas)
+            if self._comercial is not None:
+                self._modelo.set_clientes_actuales(self._comercial.clientes_actuales())
             self._actualizar_opciones_marca()
             self._aplicar_filtros_locales()
             self._actualizar_panel_numeros()
@@ -229,12 +241,17 @@ class InventarioController(QObject):
 
             cambios, _ = self._servicio.historial(planta_id)
             fecha_minima = cambios[-1].fecha if cambios else planta.fecha_registro.date()
+            comercial = self._comercial is not None
+            contrato = self._comercial.contrato_activo(planta_id) if self._comercial else None
             opciones = [
                 OpcionEstado(
                     clave=destino.value,
                     etiqueta=destino.etiqueta,
-                    requiere_motivo=destino.requiere_motivo,
-                    aviso=self._aviso_transicion(planta, destino),
+                    # Al vender, el motivo se completa solo ("Venta a [cliente]").
+                    requiere_motivo=destino.requiere_motivo
+                    and not (comercial and destino is EstadoPlanta.VENDIDA),
+                    aviso=self._aviso_transicion(planta, destino, comercial, contrato is not None),
+                    seccion=self._seccion_comercial(destino) if comercial else "",
                     # Obligatoria al salir en alquiler; opcional al regresar de él
                     # (con ambas lecturas se conocen las horas de uso del alquiler).
                     pide_horometro=(
@@ -252,18 +269,27 @@ class InventarioController(QObject):
                 fecha_minima,
                 formatear_entero(planta.horometro_actual, "h"),
                 self._vista,
+                liquidador=self._liquidador(planta_id) if contrato is not None else None,
             )
+            if self._comercial is not None:
+                comercial_servicio = self._comercial
+                dialogo.set_clientes(opciones_clientes(comercial_servicio))
+                dialogo.nuevo_cliente_solicitado.connect(
+                    lambda: crear_cliente_desde(dialogo, comercial_servicio)
+                )
             dialogo.cambio_solicitado.connect(
                 lambda clave, motivo, fecha, horometro: self._aplicar_cambio_estado(
                     dialogo, planta, clave, motivo, fecha, horometro
                 )
             )
+            self._mensaje_comercial = ""
             if self._ejecutar(dialogo) and self._resultado is not None:
                 actualizada = self._resultado
                 self.recargar()
-                self._vista.mostrar_info(
-                    "Estado actualizado", self._resumen_cambio(planta, actualizada)
-                )
+                resumen = self._resumen_cambio(planta, actualizada)
+                if self._mensaje_comercial:
+                    resumen += f"\n{self._mensaje_comercial}"
+                self._vista.mostrar_info("Estado actualizado", resumen)
 
     def ver_ficha(self, planta_id: int, pestana: str = "Historial") -> None:
         """Abre la ficha de la planta y, al cerrarla, refresca horómetros y alertas."""
@@ -421,10 +447,11 @@ class InventarioController(QObject):
     ) -> None:
         """Respuesta al botón Actualizar estado."""
         nuevo = EstadoPlanta(clave)
+        venta_comercial = self._comercial is not None and nuevo is EstadoPlanta.VENDIDA
         # Se revisa el motivo ANTES de confirmar: sería frustrante aceptar una acción
         # "irreversible" y recibir después el error de que faltaba el motivo.
         # La regla sigue viviendo en el negocio (EstadoPlanta.requiere_motivo).
-        if nuevo.requiere_motivo and not motivo.strip():
+        if nuevo.requiere_motivo and not venta_comercial and not motivo.strip():
             dialogo.mostrar_errores(
                 {"motivo": f"Debe indicar el motivo para pasar a '{nuevo.etiqueta}'."}
             )
@@ -436,9 +463,10 @@ class InventarioController(QObject):
         ):
             return
         try:
-            self._resultado = self._servicio.cambiar_estado(
-                planta.id, nuevo, motivo, fecha, horometro
+            self._mensaje_comercial = self._ejecutar_cambio(
+                planta, nuevo, motivo, fecha, horometro, dialogo.datos_comerciales()
             )
+            self._resultado = self._servicio.obtener(planta.id)
         except ValidacionError as exc:
             dialogo.mostrar_errores(exc.errores)
             return
@@ -486,10 +514,100 @@ class InventarioController(QObject):
         """Ej. "PE-005 · Cummins C50D6" (texto compartido con la ficha)."""
         return describir_planta(planta)
 
+    def _ejecutar_cambio(
+        self,
+        planta: Planta,
+        nuevo: EstadoPlanta,
+        motivo: str,
+        fecha: date,
+        horometro: int | None,
+        datos: dict[str, Any],
+    ) -> str:
+        """
+        Enruta el cambio al caso de uso que corresponde: alquilar, vender,
+        devolver un alquiler o un cambio de estado simple.
+
+        Returns:
+            Texto con el resultado comercial para el mensaje final ("" si no aplica).
+        """
+        comercial = self._comercial
+        if comercial is not None and "contrato" in datos:
+            c = datos["contrato"]
+            contrato = DatosContrato(
+                c["cliente_id"], ModalidadAlquiler(c["modalidad"]), c["tarifa"], c["observaciones"]
+            )
+            alquiler = comercial.alquilar(planta.id, contrato, horometro, fecha, motivo)  # type: ignore[arg-type]
+            return (
+                f"Contrato con {alquiler.cliente_nombre}: "
+                f"{alquiler.modalidad.etiqueta.lower()} {formatear_moneda(alquiler.tarifa)}."
+            )
+        elif comercial is not None and "venta" in datos:
+            v = datos["venta"]
+            venta = DatosVenta(v["cliente_id"], v["valor"], v["numero_documento"])
+            ingreso = comercial.vender(planta.id, venta, fecha, motivo)
+            return f"Venta a {ingreso.cliente_nombre} por {formatear_moneda(ingreso.datos.valor)}."
+        elif comercial is not None and planta.estado is EstadoPlanta.ALQUILADA:
+            liquidacion = datos.get("liquidacion", {})
+            cerrado = comercial.devolver(
+                planta.id,
+                nuevo,
+                fecha,
+                horometro,
+                motivo,
+                valor_liquidado=liquidacion.get("valor_liquidado"),
+                cobrar_saldo=liquidacion.get("cobrar_saldo", False),
+                numero_documento=liquidacion.get("numero_documento"),
+            )
+            if cerrado is None:  # Alquiler anterior a la 0.7.0, sin contrato
+                return ""
+            texto = (
+                f"Liquidación: {formatear_moneda(cerrado.valor_liquidado or 0)} · "
+                f"Cobrado: {formatear_moneda(cerrado.cobrado)}"
+            )
+            if cerrado.saldo:
+                texto += f" · Saldo por cobrar: {formatear_moneda(cerrado.saldo)}"
+            return texto + "."
+        self._servicio.cambiar_estado(planta.id, nuevo, motivo, fecha, horometro)
+        return ""
+
     @staticmethod
-    def _aviso_transicion(planta: Planta, destino: EstadoPlanta) -> str:
+    def _seccion_comercial(destino: EstadoPlanta) -> str:
+        return {EstadoPlanta.ALQUILADA: "contrato", EstadoPlanta.VENDIDA: "venta"}.get(destino, "")
+
+    def _liquidador(self, planta_id: int) -> Callable[[date], VistaLiquidacion]:
+        """Función que el diálogo llama al cambiar la fecha, para recalcular la liquidación."""
+        comercial = self._comercial
+        if comercial is None:  # Solo se usa cuando hay servicio comercial
+            raise RuntimeError("No se configuró el servicio comercial.")
+
+        def liquidar(fecha: date) -> VistaLiquidacion:
+            preliminar = comercial.liquidacion_preliminar(planta_id, fecha)
+            if preliminar is None:
+                return VistaLiquidacion("Sin contrato activo.", 0, 0)
+            alquiler, liquidacion = preliminar
+            return VistaLiquidacion(
+                f"{alquiler.cliente_nombre} · desde {alquiler.fecha_inicio:%d/%m/%Y}<br>"
+                f"{texto_liquidacion(alquiler.modalidad, alquiler.tarifa, liquidacion)}",
+                liquidacion.valor,
+                alquiler.cobrado,
+            )
+
+        return liquidar
+
+    @staticmethod
+    def _aviso_transicion(
+        planta: Planta,
+        destino: EstadoPlanta,
+        comercial: bool = False,
+        tiene_contrato: bool = False,
+    ) -> str:
         """Explica al usuario las consecuencias del cambio antes de confirmarlo."""
         avisos: list[str] = []
+        if comercial and planta.estado is EstadoPlanta.ALQUILADA and not tiene_contrato:
+            avisos.append(
+                "Este alquiler se registró antes de la versión 0.7.0: no tiene contrato "
+                "ni liquidación. Si hubo un cobro, regístrelo en la ficha como otro ingreso."
+            )
         if planta.estado.en_operacion and not destino.en_operacion:
             numero = formatear_consecutivo(planta.numero_consecutivo)
             avisos.append(

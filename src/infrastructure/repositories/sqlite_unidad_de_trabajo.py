@@ -25,6 +25,11 @@ from src.infrastructure.database.exceptions import (
     DatabaseIntegrityError,
     DatabaseLockedError,
 )
+from src.infrastructure.repositories.sqlite_comercial_repository import (
+    SqliteAlquilerRepository,
+    SqliteClienteRepository,
+    SqliteIngresoRepository,
+)
 from src.infrastructure.repositories.sqlite_consecutivo_repository import (
     SqliteConsecutivoRepository,
 )
@@ -54,6 +59,9 @@ class SqliteUnidadDeTrabajo:
     proveedores: SqliteProveedorRepository
     categorias: SqliteCategoriaRepository
     mantenimientos: SqliteMantenimientoRepository
+    clientes: SqliteClienteRepository
+    alquileres: SqliteAlquilerRepository
+    ingresos: SqliteIngresoRepository
 
     def __init__(self, db: DatabaseManager) -> None:
         self._db = db
@@ -76,6 +84,9 @@ class SqliteUnidadDeTrabajo:
         self.proveedores = SqliteProveedorRepository(conn)
         self.categorias = SqliteCategoriaRepository(conn)
         self.mantenimientos = SqliteMantenimientoRepository(conn)
+        self.clientes = SqliteClienteRepository(conn)
+        self.alquileres = SqliteAlquilerRepository(conn)
+        self.ingresos = SqliteIngresoRepository(conn)
         return self
 
     def __exit__(

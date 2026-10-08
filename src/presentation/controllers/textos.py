@@ -10,8 +10,9 @@ C50D6" se escriba de dos formas distintas en la aplicación.
 
 from typing import Final
 
+from src.business.models.comercial import Liquidacion, ModalidadAlquiler
 from src.business.models.planta import CambioEstado, Planta, RegistroConsecutivo
-from src.shared.formatters import formatear_consecutivo, formatear_entero
+from src.shared.formatters import formatear_consecutivo, formatear_entero, formatear_moneda
 
 FORMATO_FECHA: Final[str] = "%d/%m/%Y"
 
@@ -50,3 +51,19 @@ def filas_historial_consecutivos(registros: list[RegistroConsecutivo]) -> list[t
         )
         for r in registros
     ]
+
+
+def texto_liquidacion(modalidad: ModalidadAlquiler, tarifa: int, liquidacion: Liquidacion) -> str:
+    """
+    Ej. "12 días × $ 180.000 por día = $ 2.160.000" o
+    "1 mes y 10 días (tarifa $ 3.000.000 mensual) = $ 4.000.000".
+    """
+    total = formatear_moneda(liquidacion.valor)
+    if modalidad is ModalidadAlquiler.DIA:
+        return f"{liquidacion.dias} día(s) × {formatear_moneda(tarifa)} por día = {total}"
+    partes = []
+    if liquidacion.meses:
+        partes.append(f"{liquidacion.meses} mes(es)")
+    if liquidacion.dias:
+        partes.append(f"{liquidacion.dias} día(s)")
+    return f"{' y '.join(partes)} (tarifa {formatear_moneda(tarifa)} mensual) = {total}"
