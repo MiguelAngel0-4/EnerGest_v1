@@ -45,3 +45,9 @@ MANTENIMIENTO_INTERVALO_MESES: Final[int] = 6
 # Anticipación con la que un mantenimiento programado se muestra como "Próximo".
 ALERTA_DIAS_ANTICIPACION: Final[int] = 15
 ALERTA_HORAS_ANTICIPACION: Final[int] = 25
+
+# --- Rentabilidad: semáforo de reemplazo ------------------------------------
+# Desgaste: gastos acumulados como porcentaje del valor de compra.
+INDICADOR_PORCENTAJE_DESGASTE: Final[int] = 60
+# Pérdida reciente: ventana (en meses) para comparar ingresos contra gastos.
+INDICADOR_MESES_PERDIDA: Final[int] = 12

@@ -33,6 +33,7 @@ from src.business.interfaces.planta_repository import (
     IHistorialEstadoRepository,
     IPlantaRepository,
 )
+from src.business.interfaces.reporte_repository import IReporteRepository
 
 
 class IUnidadDeTrabajo(Protocol):
@@ -52,6 +53,8 @@ class IUnidadDeTrabajo(Protocol):
     clientes: IClienteRepository
     alquileres: IAlquilerRepository
     ingresos: IIngresoRepository
+    # Consultas de reportes, solo lectura (Actividad 4.4)
+    reportes: IReporteRepository
 
     def __enter__(self) -> Self:
         """Inicia la transacción."""
