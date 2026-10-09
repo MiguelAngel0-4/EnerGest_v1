@@ -21,6 +21,7 @@ from src.business.services.gasto_service import GastoService
 from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
+from src.business.services.rentabilidad_service import RentabilidadService
 from src.config import settings
 from src.config.logging_config import setup_logging
 from src.infrastructure.database.connection import DatabaseManager
@@ -82,8 +83,7 @@ def main() -> int:
         QMessageBox.critical(
             None,
             "Error al iniciar",
-            f"No se pudo preparar la base de datos.\n\n{exc}\n\n"
-            f"Los detalles están en:\n{ruta_log}",
+            f"No se pudo preparar la base de datos.\n\n{exc}\n\nLos detalles están en:\n{ruta_log}",
         )
         return 1
 
@@ -94,8 +94,17 @@ def main() -> int:
         get_data_dir() / "empresa.json", get_resource_path(_PLANTILLA_EMPRESA)
     )
     logger.info("Datos de la empresa: %s", empresa.ruta)
+    servicio_rentabilidad = RentabilidadService(
+        fabrica_uow,
+        umbral_desgaste=settings.INDICADOR_PORCENTAJE_DESGASTE,
+        meses_perdida=settings.INDICADOR_MESES_PERDIDA,
+    )
     servicio_hojas_vida = HojaVidaService(
-        fabrica_uow, GeneradorPdfHojaVida(), empresa.obtener, settings.APP_VERSION
+        fabrica_uow,
+        GeneradorPdfHojaVida(),
+        empresa.obtener,
+        settings.APP_VERSION,
+        rentabilidad=servicio_rentabilidad,
     )
     servicio_gastos = GastoService(fabrica_uow)
     servicio_comercial = ComercialService(fabrica_uow, servicio_plantas)
@@ -118,6 +127,7 @@ def main() -> int:
         intervalo_meses=settings.MANTENIMIENTO_INTERVALO_MESES,
         intervalo_horas=settings.MANTENIMIENTO_INTERVALO_HORAS,
         comercial=servicio_comercial,
+        rentabilidad=servicio_rentabilidad,
     )
     controlador_inventario = InventarioController(
         servicio_plantas,

@@ -36,11 +36,13 @@ from reportlab.platypus import (
 
 from src.business.exceptions import DocumentoError
 from src.business.models.hoja_vida import HojaDeVida
+from src.shared.colores import SEMAFORO
 from src.shared.formatters import (
     formatear_consecutivo,
     formatear_decimal,
     formatear_entero,
     formatear_moneda,
+    formatear_porcentaje,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,7 @@ FORMATO_FECHA: Final[str] = "%d/%m/%Y"
 FASES: Final[dict[int, str]] = {1: "Monofásica (1)", 3: "Trifásica (3)"}
 
 _NORMAL = ParagraphStyle("normal", fontName="Helvetica", fontSize=9, leading=11.5)
+
 _VACIO = ParagraphStyle("vacio", parent=_NORMAL, fontName="Helvetica-Oblique", textColor=GRIS)
 _ETIQUETA = ParagraphStyle(
     "etiqueta", parent=_NORMAL, fontName="Helvetica-Bold", fontSize=8, textColor=AZUL
@@ -173,11 +176,13 @@ class GeneradorPdfHojaVida:
             *self._seccion("4. Operación", self._tabla_operacion(hoja)),
             *self._seccion("5. Historial de estados", self._tabla_estados(hoja)),
             *self._seccion("6. Historial de números consecutivos", self._tabla_consecutivos(hoja)),
+            *self._seccion("7. Historial de mantenimientos", self._tabla_mantenimientos(hoja)),
+            *self._seccion("8. Historial de alquileres", self._tabla_alquileres(hoja)),
             # La última sección y las firmas viajan JUNTAS: si no caben, pasan a la
             # siguiente página juntas, y nunca quedan las firmas solas en una hoja.
             *self._seccion(
-                "7. Historial de mantenimientos",
-                self._tabla_mantenimientos(hoja),
+                "9. Resumen financiero",
+                self._resumen_financiero(hoja),
                 al_final=[Spacer(1, 0.7 * cm), self._firmas()],
             ),
         ]
@@ -467,6 +472,68 @@ class GeneradorPdfHojaVida:
         )
         return Table(
             [[tabla], [proximo]],
+            colWidths=[ANCHO_UTIL],
+            style=TableStyle(
+                [("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]
+            ),
+        )
+
+    @staticmethod
+    def _tabla_alquileres(hoja: HojaDeVida) -> Table:
+        filas = [
+            [
+                _texto(a.cliente_nombre),
+                _texto(a.fecha_inicio.strftime(FORMATO_FECHA)),
+                _texto(a.fecha_fin.strftime(FORMATO_FECHA) if a.fecha_fin else "Activo"),
+                _texto(f"{a.modalidad.etiqueta} · {formatear_moneda(a.tarifa)}"),
+                _texto(formatear_entero(a.horas_uso, "h") if a.horas_uso is not None else ""),
+                _texto(
+                    formatear_moneda(a.valor_liquidado) if a.valor_liquidado is not None else ""
+                ),
+                _texto(formatear_moneda(a.cobrado)),
+            ]
+            for a in hoja.alquileres
+        ]
+        return _tabla_historial(
+            ["Cliente", "Desde", "Hasta", "Condiciones", "Horas", "Liquidado", "Cobrado"],
+            filas,
+            # Las fechas necesitan 2,25 cm para no partirse en dos renglones.
+            [ANCHO_UTIL - 14.5 * cm, 2.25 * cm, 2.25 * cm, 3.6 * cm, 1.4 * cm, 2.5 * cm, 2.5 * cm],
+        )
+
+    def _resumen_financiero(self, hoja: HojaDeVida) -> Flowable:
+        balance = hoja.balance
+        if balance is None:
+            return Paragraph("Información financiera no disponible.", _VACIO)
+        t = balance.totales
+        desgaste = balance.indicador.desgaste_pct
+        pares: list[tuple[str, str | None]] = [
+            ("Ingresos de operación", formatear_moneda(t.ingresos_operacion)),
+            (
+                "Venta de la planta",
+                formatear_moneda(t.ingresos_venta) if t.ingresos_venta else "No aplica",
+            ),
+            ("Gastos", formatear_moneda(t.gastos)),
+            ("Resultado de operación", formatear_moneda(t.resultado_operacion)),
+            ("Valor de compra", _moneda(balance.planta.datos.valor_compra)),
+            ("Recuperación de la inversión", _moneda(balance.recuperacion)),
+            ("Desgaste acumulado", formatear_porcentaje(desgaste)),
+            ("Horas de uso en alquileres", formatear_entero(balance.horas_uso_alquiler, "h")),
+            ("Ingreso por hora de uso", _moneda(balance.ingreso_por_hora)),
+            ("Saldo por cobrar", formatear_moneda(balance.saldo_por_cobrar)),
+        ]
+        indicador = balance.indicador
+        color = SEMAFORO.get(indicador.nivel.value, SEMAFORO["SIN_DATOS"])[1]
+        # Espacio de no separación: "60 %" nunca se parte entre dos renglones.
+        razones = " ".join(indicador.razones).replace(" %", "&nbsp;%")
+        semaforo = Paragraph(
+            f"<b>Semáforo de reemplazo: <font color='{color}'>{indicador.nivel.etiqueta}</font></b>"
+            + (f". {razones}" if razones else "")
+            + " <i>El semáforo sugiere, no decide.</i>",
+            _NORMAL,
+        )
+        return Table(
+            [[self._tabla_datos(pares)], [Spacer(1, 0.15 * cm)], [semaforo]],
             colWidths=[ANCHO_UTIL],
             style=TableStyle(
                 [("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]

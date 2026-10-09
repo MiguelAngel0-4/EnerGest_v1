@@ -7,6 +7,7 @@ Reúne todo lo que se sabe de una planta. Cada sub-iteración de la
 Actividad 4 habilita una pestaña nueva, sin tocar el inventario.
 """
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -17,16 +18,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.presentation.widgets.balance_widget import BalanceWidget
 from src.presentation.widgets.gastos_widget import GastosWidget
 from src.presentation.widgets.ingresos_widget import IngresosWidget
 from src.presentation.widgets.mantenimientos_widget import MantenimientosWidget
 from src.presentation.widgets.tabla_texto import FilaTexto, crear_tabla_texto
 
-_PROXIMAMENTE = ("Balance",)
+_PROXIMAMENTE: tuple[str, ...] = ()  # Todas las pestañas ya están disponibles
 
 
 class FichaPlantaDialog(QDialog):
     """Ventana de detalle de una planta."""
+
+    pestana_mostrada = Signal(str)  # Nombre de la pestaña que el usuario abrió
 
     def __init__(
         self,
@@ -51,6 +55,11 @@ class FichaPlantaDialog(QDialog):
         self._pestanas.addTab(self.mantenimientos, "Mantenimientos")
         self.ingresos = IngresosWidget()
         self._pestanas.addTab(self.ingresos, "Ingresos")
+        self.balance = BalanceWidget()
+        self._pestanas.addTab(self.balance, "Balance")
+        self._pestanas.currentChanged.connect(
+            lambda indice: self.pestana_mostrada.emit(self._pestanas.tabText(indice))
+        )
         for nombre in _PROXIMAMENTE:
             indice = self._pestanas.addTab(QWidget(), nombre)
             self._pestanas.setTabEnabled(indice, False)

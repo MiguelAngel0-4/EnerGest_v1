@@ -103,7 +103,7 @@ def test_las_firmas_nunca_quedan_solas_en_una_pagina(tmp_path: Path) -> None:
         paginas = _texto(GeneradorPdfHojaVida().generar(_hoja(cambios=cambios), tmp_path / "f.pdf"))
         ultima = paginas[-1]
         assert "Elaborado por" in ultima
-        assert "HISTORIAL DE MANTENIMIENTOS" in ultima  # Acompañadas por la última sección
+        assert "RESUMEN FINANCIERO" in ultima  # Acompañadas por la última sección
 
 
 def test_logo_valido_y_logo_danado(tmp_path: Path) -> None:

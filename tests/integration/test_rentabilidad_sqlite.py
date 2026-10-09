@@ -187,3 +187,28 @@ def test_exportar_a_excel(escenario, tmp_path: Path) -> None:
     semaforos = [resumen.cell(fila, 10).value for fila in range(11, 15)]
     assert "Evaluar reemplazo" in semaforos
     assert libro["Movimientos"].max_row == 6  # Encabezado + 5 movimientos
+
+
+def test_hoja_de_vida_v2_con_alquileres_y_resumen_financiero(escenario, tmp_path: Path) -> None:
+    pypdf = pytest.importorskip("pypdf")
+    from src.business.models.hoja_vida import DatosEmpresa
+    from src.business.services.hoja_vida_service import HojaVidaService
+    from src.infrastructure.reports.pdf_hoja_vida import GeneradorPdfHojaVida
+
+    servicio, p = escenario
+    hojas = HojaVidaService(
+        servicio._uow_factory,
+        GeneradorPdfHojaVida(),
+        lambda: DatosEmpresa("WG ENERGIA"),
+        "0.8.0",
+        rentabilidad=servicio,
+    )
+    ruta = hojas.exportar(p["A"], tmp_path / "hoja.pdf")
+
+    paginas = [pagina.extract_text() for pagina in pypdf.PdfReader(ruta).pages]
+    texto = " ".join(" ".join(paginas).split())  # Une los renglones de las celdas
+    assert "8. HISTORIAL DE ALQUILERES" in texto and "Constructora del Pacífico" in texto
+    assert "9. RESUMEN FINANCIERO" in texto
+    assert "Evaluar reemplazo" in texto and "75 %" in texto
+    assert "Elaborado por" in paginas[-1] and "RESUMEN FINANCIERO" in paginas[-1]
+    assert "01/06/2025" in texto  # Defecto corregido: la fecha ya no se parte en dos renglones

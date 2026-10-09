@@ -17,6 +17,7 @@ from src.business.exceptions import PlantaNoEncontradaError
 from src.business.interfaces.generador_documentos import IGeneradorHojaVida
 from src.business.interfaces.unidad_de_trabajo import FabricaUnidadDeTrabajo
 from src.business.models.hoja_vida import DatosEmpresa, HojaDeVida
+from src.business.services.rentabilidad_service import RentabilidadService
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class HojaVidaService:
         empresa: Callable[[], DatosEmpresa],
         version_app: str,
         ahora: Callable[[], datetime] = datetime.now,
+        rentabilidad: RentabilidadService | None = None,
     ) -> None:
         """
         Args:
@@ -41,11 +43,13 @@ class HojaVidaService:
                      empresa se refleje sin reiniciar la aplicación.
             version_app: Versión del programa, para el pie de página.
             ahora: "Reloj inyectable" (fecha fija en las pruebas).
+            rentabilidad: Si se entrega, la hoja incluye el resumen financiero.
         """
         self._uow_factory = uow_factory
         self._generador = generador
         self._empresa = empresa
         self._version_app = version_app
+        self._rentabilidad = rentabilidad
         self._ahora = ahora
 
     def preparar(self, planta_id: int) -> HojaDeVida:
@@ -64,6 +68,9 @@ class HojaVidaService:
             # El repositorio los entrega del más reciente al más antiguo; el documento
             # los muestra en orden cronológico, como los demás historiales.
             mantenimientos = list(reversed(uow.mantenimientos.listar_por_planta(planta_id)))
+            alquileres = list(reversed(uow.alquileres.listar_por_planta(planta_id)))
+        # Fuera de la transacción anterior: el servicio de rentabilidad abre la suya.
+        balance = self._rentabilidad.balance(planta_id) if self._rentabilidad else None
 
         return HojaDeVida(
             planta=planta,
@@ -73,6 +80,8 @@ class HojaVidaService:
             generado_en=self._ahora(),
             version_app=self._version_app,
             mantenimientos=tuple(mantenimientos),
+            alquileres=tuple(alquileres),
+            balance=balance,
         )
 
     def exportar(self, planta_id: int, destino: Path) -> Path:
