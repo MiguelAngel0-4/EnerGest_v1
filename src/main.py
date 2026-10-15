@@ -26,13 +26,16 @@ from src.config import settings
 from src.config.logging_config import setup_logging
 from src.infrastructure.database.connection import DatabaseManager
 from src.infrastructure.database.exceptions import DatabaseError
+from src.infrastructure.reports.excel_reporte import ExportadorExcel
 from src.infrastructure.reports.pdf_hoja_vida import GeneradorPdfHojaVida
 from src.infrastructure.repositories.empresa_json_repository import EmpresaJsonRepository
 from src.infrastructure.repositories.sqlite_unidad_de_trabajo import crear_fabrica_uow
 from src.presentation.controllers.ficha_controller import FichaPlantaController
 from src.presentation.controllers.inventario_controller import InventarioController
+from src.presentation.controllers.reportes_controller import ReportesController
 from src.presentation.views.equipos.inventario_view import InventarioView
 from src.presentation.views.main_window import MainWindow
+from src.presentation.views.reportes.reportes_view import ReportesView
 from src.shared.paths import (
     get_data_dir,
     get_database_path,
@@ -137,6 +140,16 @@ def main() -> int:
         ficha=controlador_ficha,
         mantenimientos=servicio_mantenimientos,
         comercial=servicio_comercial,
+    )
+
+    vista_reportes = ReportesView()
+    ventana.agregar_vista("reportes", vista_reportes)
+    ReportesController(
+        servicio_rentabilidad,
+        ExportadorExcel(),
+        vista_reportes,
+        abrir_ficha=controlador_inventario.ver_ficha,
+        parent=ventana,  # La ventana lo mantiene vivo mientras exista
     )
 
     ventana.registro_solicitado.connect(controlador_inventario.abrir_registro)

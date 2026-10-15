@@ -10,7 +10,6 @@ sub-iteración de la Actividad 4 agregará aquí la lógica de su pestaña.
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import date
 from typing import Any, Final, Protocol
 
 from PySide6.QtCore import QObject
@@ -40,6 +39,7 @@ from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
 from src.business.services.rentabilidad_service import RentabilidadService
 from src.presentation.controllers.clientes import crear_cliente_desde, opciones_clientes
+from src.presentation.controllers.periodos import periodo_desde_seleccion
 from src.presentation.controllers.textos import (
     FORMATO_FECHA,
     describir_planta,
@@ -523,14 +523,7 @@ class FichaPlantaController(QObject):
         if self._ficha is None or self._rentabilidad is None:
             return Periodo()
         clave, desde, hasta = self._ficha.balance.periodo_elegido()
-        hoy = date.today()
-        if clave == "ANIO":
-            return Periodo(date(hoy.year, 1, 1), hoy)
-        if clave == "RECIENTE":
-            return self._rentabilidad.periodo_reciente()
-        if clave == "RANGO":
-            return Periodo(min(desde, hasta), max(desde, hasta))
-        return Periodo()
+        return periodo_desde_seleccion(clave, desde, hasta, self._rentabilidad)
 
     def _recargar_balance(self) -> None:
         if self._planta is None or self._ficha is None:

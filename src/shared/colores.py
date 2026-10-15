@@ -16,3 +16,7 @@ SEMAFORO: Final[dict[str, tuple[str, str]]] = {
     "EVALUAR_REEMPLAZO": ("#FDECEA", "#C0392B"),
     "SIN_DATOS": ("#F1F3F5", "#6C757D"),
 }
+
+# Series del gráfico financiero: ingresos en verde, gastos en rojo.
+INGRESOS: Final[str] = "#2E9E5B"
+GASTOS: Final[str] = "#C0392B"

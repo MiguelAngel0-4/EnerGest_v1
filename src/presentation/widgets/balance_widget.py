@@ -9,12 +9,10 @@ que costó (recuperación de la inversión). El semáforo sugiere, no decide.
 """
 
 from datetime import date
-from typing import Final, NamedTuple
+from typing import NamedTuple
 
-from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
-    QDateEdit,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -23,14 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.presentation.widgets.selector_periodo import SelectorPeriodo
 from src.shared.colores import SEMAFORO
-
-PERIODOS: Final[list[tuple[str, str]]] = [
-    ("Todo el historial", "TODO"),
-    ("Año actual", "ANIO"),
-    ("Últimos 12 meses", "RECIENTE"),
-    ("Rango de fechas…", "RANGO"),
-]
 
 
 class FilaBalance(NamedTuple):
@@ -46,19 +38,13 @@ class BalanceWidget(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._periodo = QComboBox()
-        for texto, clave in PERIODOS:
-            self._periodo.addItem(texto, clave)
-        self._desde = self._selector_fecha(QDate(QDate.currentDate().year(), 1, 1))
-        self._hasta = self._selector_fecha(QDate.currentDate())
-        self._etiqueta_hasta = QLabel("al")
-
+        self._selector = SelectorPeriodo()
+        # Nombres internos conservados (los usan las pruebas de la R2).
+        self._periodo = self._selector.combo
+        self._desde = self._selector.desde
+        self._hasta = self._selector.hasta
         barra = QHBoxLayout()
-        barra.addWidget(QLabel("Período:"))
-        barra.addWidget(self._periodo)
-        barra.addWidget(self._desde)
-        barra.addWidget(self._etiqueta_hasta)
-        barra.addWidget(self._hasta)
+        barra.addWidget(self._selector)
         barra.addStretch()
 
         self._semaforo = QFrame()
@@ -92,27 +78,13 @@ class BalanceWidget(QWidget):
         layout.addWidget(contenedor)
         layout.addStretch()
 
-        self._periodo.currentIndexChanged.connect(self._al_cambiar_periodo)
-        self._desde.dateChanged.connect(lambda _f: self.periodo_cambiado.emit())
-        self._hasta.dateChanged.connect(lambda _f: self.periodo_cambiado.emit())
-        self._mostrar_rango(False)
-
-    @staticmethod
-    def _selector_fecha(inicial: QDate) -> QDateEdit:
-        selector = QDateEdit(inicial)
-        selector.setCalendarPopup(True)
-        selector.setDisplayFormat("dd/MM/yyyy")
-        return selector
+        self._selector.periodo_cambiado.connect(self.periodo_cambiado)
 
     # --- API pública ------------------------------------------------------
 
     def periodo_elegido(self) -> tuple[str, date, date]:
         """(clave del período, desde, hasta). Las fechas solo aplican al rango."""
-        return (
-            self._periodo.currentData(),
-            self._desde.date().toPython(),
-            self._hasta.date().toPython(),
-        )
+        return self._selector.elegido()
 
     def mostrar_semaforo(self, nivel: str, titulo: str, razones: list[str]) -> None:
         fondo, color = SEMAFORO.get(nivel, SEMAFORO["SIN_DATOS"])
@@ -153,11 +125,3 @@ class BalanceWidget(QWidget):
             self._cifras.addWidget(valor, fila_grilla, 1)
             self._cifras.addWidget(detalle, fila_grilla, 2)
             fila_grilla += 1
-
-    def _al_cambiar_periodo(self) -> None:
-        self._mostrar_rango(self._periodo.currentData() == "RANGO")
-        self.periodo_cambiado.emit()
-
-    def _mostrar_rango(self, visible: bool) -> None:
-        for control in (self._desde, self._etiqueta_hasta, self._hasta):
-            control.setVisible(visible)

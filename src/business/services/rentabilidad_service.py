@@ -116,9 +116,20 @@ class RentabilidadService:
         with self._uow_factory() as uow:
             return uow.reportes.movimientos(periodo.desde, periodo.hasta)
 
-    def exportar(self, periodo: Periodo, exportador: IExportadorReporte, destino: Path) -> Path:
-        """Raises: DocumentoError"""
-        ruta = exportador.exportar(self.resumen(periodo), self.movimientos(periodo), destino)
+    def exportar(
+        self,
+        periodo: Periodo,
+        exportador: IExportadorReporte,
+        destino: Path,
+        incluir_fuera_de_operacion: bool = True,
+    ) -> Path:
+        """
+        Exporta lo mismo que muestra la pantalla: mismo período y mismas plantas.
+
+        Raises: DocumentoError
+        """
+        resumen = self.resumen(periodo, incluir_fuera_de_operacion)
+        ruta = exportador.exportar(resumen, self.movimientos(periodo), destino)
         logger.info("Reporte financiero exportado a %s", ruta)
         return ruta
 

@@ -304,3 +304,20 @@ QRadioButton::indicator:disabled, QCheckBox::indicator:disabled {
     background-color: #F1F3F5;
     border-color: #C4CDD5;
 }
+
+/* Tarjetas de cifras de los Reportes financieros */
+QFrame#tarjeta {
+    background-color: #FFFFFF;
+    border: 1px solid #D5DCE3;
+    border-left: 4px solid #1F3A5F;
+    border-radius: 6px;
+}
+QFrame#tarjeta QLabel {
+    background: transparent;
+    border: none;
+}
+QLabel#valorTarjeta {
+    font-size: 16pt;
+    font-weight: bold;
+    color: #1F2933;
+}
