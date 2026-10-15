@@ -21,17 +21,21 @@ from src.business.services.gasto_service import GastoService
 from src.business.services.hoja_vida_service import HojaVidaService
 from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
+from src.business.services.rentabilidad_service import RentabilidadService
 from src.config import settings
 from src.config.logging_config import setup_logging
 from src.infrastructure.database.connection import DatabaseManager
 from src.infrastructure.database.exceptions import DatabaseError
+from src.infrastructure.reports.excel_reporte import ExportadorExcel
 from src.infrastructure.reports.pdf_hoja_vida import GeneradorPdfHojaVida
 from src.infrastructure.repositories.empresa_json_repository import EmpresaJsonRepository
 from src.infrastructure.repositories.sqlite_unidad_de_trabajo import crear_fabrica_uow
 from src.presentation.controllers.ficha_controller import FichaPlantaController
 from src.presentation.controllers.inventario_controller import InventarioController
+from src.presentation.controllers.reportes_controller import ReportesController
 from src.presentation.views.equipos.inventario_view import InventarioView
 from src.presentation.views.main_window import MainWindow
+from src.presentation.views.reportes.reportes_view import ReportesView
 from src.shared.paths import (
     get_data_dir,
     get_database_path,
@@ -82,8 +86,7 @@ def main() -> int:
         QMessageBox.critical(
             None,
             "Error al iniciar",
-            f"No se pudo preparar la base de datos.\n\n{exc}\n\n"
-            f"Los detalles están en:\n{ruta_log}",
+            f"No se pudo preparar la base de datos.\n\n{exc}\n\nLos detalles están en:\n{ruta_log}",
         )
         return 1
 
@@ -94,8 +97,17 @@ def main() -> int:
         get_data_dir() / "empresa.json", get_resource_path(_PLANTILLA_EMPRESA)
     )
     logger.info("Datos de la empresa: %s", empresa.ruta)
+    servicio_rentabilidad = RentabilidadService(
+        fabrica_uow,
+        umbral_desgaste=settings.INDICADOR_PORCENTAJE_DESGASTE,
+        meses_perdida=settings.INDICADOR_MESES_PERDIDA,
+    )
     servicio_hojas_vida = HojaVidaService(
-        fabrica_uow, GeneradorPdfHojaVida(), empresa.obtener, settings.APP_VERSION
+        fabrica_uow,
+        GeneradorPdfHojaVida(),
+        empresa.obtener,
+        settings.APP_VERSION,
+        rentabilidad=servicio_rentabilidad,
     )
     servicio_gastos = GastoService(fabrica_uow)
     servicio_comercial = ComercialService(fabrica_uow, servicio_plantas)
@@ -118,6 +130,7 @@ def main() -> int:
         intervalo_meses=settings.MANTENIMIENTO_INTERVALO_MESES,
         intervalo_horas=settings.MANTENIMIENTO_INTERVALO_HORAS,
         comercial=servicio_comercial,
+        rentabilidad=servicio_rentabilidad,
     )
     controlador_inventario = InventarioController(
         servicio_plantas,
@@ -127,6 +140,16 @@ def main() -> int:
         ficha=controlador_ficha,
         mantenimientos=servicio_mantenimientos,
         comercial=servicio_comercial,
+    )
+
+    vista_reportes = ReportesView()
+    ventana.agregar_vista("reportes", vista_reportes)
+    ReportesController(
+        servicio_rentabilidad,
+        ExportadorExcel(),
+        vista_reportes,
+        abrir_ficha=controlador_inventario.ver_ficha,
+        parent=ventana,  # La ventana lo mantiene vivo mientras exista
     )
 
     ventana.registro_solicitado.connect(controlador_inventario.abrir_registro)

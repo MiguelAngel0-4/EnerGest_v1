@@ -209,3 +209,52 @@ plantas se devuelven sin liquidación, conservando sus datos históricos.
 | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------- |
 | El mensaje de error del diálogo de estado se ocultaba solo (el reformateo automático del horómetro disparaba `textChanged`) | Se usa `textEdited`, que solo reacciona a lo que escribe el usuario | `test_alquilar_sin_cliente_ni_tarifa_no_se_envia` |
 | El mensaje final de un cambio de estado no informaba el resultado comercial                                                 | Incluye contrato, liquidación con saldo o valor de la venta         | Revisión del recorrido completo                   |
+
+## Ciclo 8 — Rentabilidad y reportes financieros (Actividad 4.4)
+
+| Campo                | Detalle                                                   |
+| -------------------- | --------------------------------------------------------- |
+| Fecha                | 2026-10-14                                                |
+| Versión              | 0.8.0 (esquema de base de datos versión 4, sin migración) |
+| Responsable          | [Tu nombre]                                               |
+| Tipo de prueba       | Unitarias (152), integración (69) e interfaz (60)         |
+| Casos ejecutados     | 281 (37 nuevos en este ciclo)                             |
+| Aprobados / Fallidos | 281 / 0                                                   |
+| Evidencia            | 2026-10-14_v0.8.0_rentabilidad.html                       |
+
+**Semáforo de reemplazo (función pura):** los cuatro niveles, el borde exacto
+del 60 %, el empate de ingresos y gastos, la planta sin valor de compra, la
+planta sin movimientos, la planta inactiva que solo genera gastos y los
+umbrales configurables (`test_indicador_reemplazo.py`).
+
+**Escenario de integración de más de un año con cuatro plantas**
+(`test_rentabilidad_sqlite.py`):
+
+| Planta | Historia                                            | Resultado esperado                                  |
+| ------ | --------------------------------------------------- | --------------------------------------------------- |
+| A      | Alquilada y luego con una reparación de $ 7.000.000 | Evaluar reemplazo (75 % de desgaste)                |
+| B      | Sin valor de compra, con un gasto reciente          | Vigilar, con advertencia                            |
+| C      | Sin movimientos                                     | Sin datos suficientes                               |
+| D      | Alquilada con saldo sin cobrar y vendida            | Recuperación de −$ 2.000.000 y $ 500.000 por cobrar |
+
+También verifica: filtro por período, exclusión de anulados, semáforo
+independiente del período consultado, ventana de 12 meses, movimientos con el
+formato de la aplicación, exportación a Excel con valores numéricos y hoja de
+vida v2 con las secciones 8 y 9.
+
+**Interfaz:** pestaña Balance (semáforo, cifras y recuperación no calculada en
+períodos parciales), orden por valor real y no por texto, orden del semáforo
+por gravedad, tarjetas, gráfico, menú habilitado al registrar la vista,
+exportación de lo que se ve y doble clic hacia el balance.
+
+**Hallazgos corregidos durante el ciclo:**
+
+| Hallazgo                                                                     | Corrección                                                      | Prueba de regresión                                        |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+| Las fechas del historial de alquileres se partían en dos renglones en el PDF | Columnas de 2,25 cm                                             | `test_hoja_de_vida_v2_con_alquileres_y_resumen_financiero` |
+| "60 %" se partía entre renglones                                             | Espacio de no separación                                        | Revisión visual del PDF                                    |
+| El desgaste mostraba "0 %" para valores menores que 1                        | `formatear_porcentaje` muestra "< 1 %"                          | `test_formatear_porcentaje`                                |
+| Formato "PE-004" escrito a mano en el SQL de movimientos                     | Se usa `formatear_consecutivo`                                  | `test_movimientos_con_el_formato_de_la_aplicacion`         |
+| Colores del semáforo duplicados en la pestaña y el PDF                       | `shared/colores.py`                                             | Revisión de código                                         |
+| Reformateo automático de 10 archivos ajenos a la entrega R2                  | Revertido; el formateo se aplica solo a los archivos trabajados | Revisión del paquete                                       |
+| Botón del menú cortado y eje del gráfico con marcas irregulares              | Menú de 210 px y `applyNiceNumbers()`                           | Revisión visual                                            |

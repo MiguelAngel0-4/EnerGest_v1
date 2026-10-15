@@ -13,8 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from src.business.models.comercial import Alquiler
 from src.business.models.mantenimiento import Mantenimiento
 from src.business.models.planta import CambioEstado, Planta, RegistroConsecutivo
+from src.business.models.rentabilidad import BalancePlanta
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +42,9 @@ class HojaDeVida:
     version_app: str
     # Mantenimientos vigentes, del más antiguo al más reciente (Actividad 4.2)
     mantenimientos: tuple[Mantenimiento, ...] = ()
+    # Hoja de vida v2 (Actividad 4.4)
+    alquileres: tuple[Alquiler, ...] = ()  # Del más antiguo al más reciente
+    balance: BalancePlanta | None = None  # Toda la vida de la planta
 
     @property
     def ultimo_numero(self) -> int | None:

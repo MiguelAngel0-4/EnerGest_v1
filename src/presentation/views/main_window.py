@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
     def _construir_menu_lateral(self) -> QFrame:
         menu = QFrame()
         menu.setObjectName("menuLateral")
-        menu.setFixedWidth(190)
+        menu.setFixedWidth(210)  # "Reportes financieros" en negrita cabe completo
 
         logo = QLabel("EG")
         logo.setObjectName("logo")
@@ -73,11 +73,17 @@ class MainWindow(QMainWindow):
         boton_registro = self._boton_menu("Registro nuevo")
         boton_registro.clicked.connect(self.registro_solicitado)
 
-        boton_reportes = self._boton_menu("Reportes financieros")
+        # Navegable, pero deshabilitado hasta que se registre su vista (agregar_vista).
+        self._boton_reportes = self._boton_menu("Reportes financieros", navegable=True)
+        self._boton_reportes.clicked.connect(lambda: self.mostrar_vista("reportes"))
         boton_configuracion = self._boton_menu("Configuración")
-        for boton in (boton_reportes, boton_configuracion):
+        for boton in (self._boton_reportes, boton_configuracion):
             boton.setEnabled(False)
             boton.setToolTip(_TEXTO_PROXIMAMENTE)
+        self._botones_vista = {
+            "inventario": self._boton_inventario,
+            "reportes": self._boton_reportes,
+        }
 
         boton_salir = self._boton_menu("Salir")
         boton_salir.clicked.connect(self.close)
@@ -88,7 +94,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(logo)
         layout.addWidget(subtitulo)
         layout.addSpacing(24)
-        for boton in (self._boton_inventario, boton_registro, boton_reportes, boton_configuracion):
+        for boton in (
+            self._boton_inventario,
+            boton_registro,
+            self._boton_reportes,
+            boton_configuracion,
+        ):
             layout.addWidget(boton)
         layout.addStretch()
         layout.addWidget(boton_salir)
@@ -112,14 +123,19 @@ class MainWindow(QMainWindow):
         """Registra una vista en el contenedor. La primera se muestra por defecto."""
         self._vistas[clave] = vista
         self._contenedor.addWidget(vista)
+        boton = self._botones_vista.get(clave)
+        if boton is not None:
+            boton.setEnabled(True)
+            boton.setToolTip("")
         if len(self._vistas) == 1:
             self.mostrar_vista(clave)
 
     def mostrar_vista(self, clave: str) -> None:
         """Cambia la "página" visible del contenedor."""
         self._contenedor.setCurrentWidget(self._vistas[clave])
-        if clave == "inventario":
-            self._boton_inventario.setChecked(True)
+        boton = self._botones_vista.get(clave)
+        if boton is not None:
+            boton.setChecked(True)
 
     def set_mensaje_estado(self, texto: str) -> None:
         """Texto permanente en la barra inferior (versión, ubicación de la BD)."""
