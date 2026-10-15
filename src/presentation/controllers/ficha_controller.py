@@ -32,11 +32,14 @@ from src.business.models.mantenimiento import (
     TipoMantenimiento,
 )
 from src.business.models.planta import Planta
+from src.business.models.rentabilidad import BalancePlanta, Periodo
 from src.business.services.comercial_service import ComercialService
 from src.business.services.gasto_service import GastoService
 from src.business.services.mantenimiento_service import MantenimientoService
 from src.business.services.planta_service import PlantaService
+from src.business.services.rentabilidad_service import RentabilidadService
 from src.presentation.controllers.clientes import crear_cliente_desde, opciones_clientes
+from src.presentation.controllers.periodos import periodo_desde_seleccion
 from src.presentation.controllers.textos import (
     FORMATO_FECHA,
     describir_planta,
@@ -60,10 +63,16 @@ from src.presentation.dialogs.mantenimiento_dialog import (
     InsumoSugerido,
     RegistrarMantenimientoDialog,
 )
+from src.presentation.widgets.balance_widget import FilaBalance
 from src.presentation.widgets.formulario_base import FormularioBase
 from src.presentation.widgets.gastos_widget import FilaGasto
 from src.presentation.widgets.registros_widget import FilaRegistro
-from src.shared.formatters import formatear_decimal, formatear_entero, formatear_moneda
+from src.shared.formatters import (
+    formatear_decimal,
+    formatear_entero,
+    formatear_moneda,
+    formatear_porcentaje,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +106,7 @@ class FichaPlantaController(QObject):
         intervalo_meses: int = 6,
         intervalo_horas: int = 250,
         comercial: ComercialService | None = None,
+        rentabilidad: RentabilidadService | None = None,
     ) -> None:
         """
         Args:
@@ -110,6 +120,7 @@ class FichaPlantaController(QObject):
         self._intervalo_meses = intervalo_meses
         self._intervalo_horas = intervalo_horas
         self._comercial = comercial
+        self._rentabilidad = rentabilidad
         self._ver_ingresos_anulados = False
         self._ventana_padre = ventana_padre
         self._planta: Planta | None = None
@@ -161,6 +172,12 @@ class FichaPlantaController(QObject):
         if self._comercial is None:
             ficha.ingresos.deshabilitar_registro("El módulo comercial no está disponible.")
         self._ver_ingresos_anulados = False
+        # El balance se calcula al abrir su pestaña (y cada vez que se vuelve a ella),
+        # así refleja los gastos o ingresos registrados en las otras pestañas.
+        ficha.pestana_mostrada.connect(
+            lambda nombre: self._recargar_balance() if nombre == "Balance" else None
+        )
+        ficha.balance.periodo_cambiado.connect(self._recargar_balance)
         self._recargar_gastos()
         self._recargar_mantenimientos()
         self._recargar_ingresos()
@@ -499,6 +516,31 @@ class FichaPlantaController(QObject):
         self._recargar_ingresos()
 
     # ------------------------------------------------------------------ #
+    # Balance (Actividad 4.4)
+    # ------------------------------------------------------------------ #
+
+    def _periodo_elegido(self) -> Periodo:
+        if self._ficha is None or self._rentabilidad is None:
+            return Periodo()
+        clave, desde, hasta = self._ficha.balance.periodo_elegido()
+        return periodo_desde_seleccion(clave, desde, hasta, self._rentabilidad)
+
+    def _recargar_balance(self) -> None:
+        if self._planta is None or self._ficha is None:
+            return
+        vista = self._ficha.balance
+        if self._rentabilidad is None:
+            vista.mostrar_semaforo("SIN_DATOS", "Balance no disponible", [])
+            return
+        with self._capturar_errores("Cargar balance", self._ficha.gastos):
+            balance = self._rentabilidad.balance(self._planta.id, self._periodo_elegido())
+            indicador = balance.indicador
+            vista.mostrar_semaforo(
+                indicador.nivel.value, indicador.nivel.etiqueta.upper(), list(indicador.razones)
+            )
+            vista.mostrar_cifras(_filas_balance(balance))
+
+    # ------------------------------------------------------------------ #
     # Facturas y proveedores
     # ------------------------------------------------------------------ #
 
@@ -759,3 +801,107 @@ def _fila_alquiler(alquiler: Alquiler) -> tuple[str, ...]:
         formatear_moneda(alquiler.cobrado),
         dinero(alquiler.saldo),
     )
+
+
+def _filas_balance(balance: BalancePlanta) -> list[FilaBalance]:
+    """Cifras de la pestaña Balance, ya formateadas."""
+    t = balance.totales
+
+    def detalle(partes: list[tuple[str, int]]) -> str:
+        return " · ".join(
+            f"{nombre} {formatear_moneda(valor)}" for nombre, valor in partes if valor
+        )
+
+    filas = [
+        FilaBalance(
+            "Ingresos de operación",
+            formatear_moneda(t.ingresos_operacion),
+            detalle([("alquileres", t.ingresos_alquiler), ("otros", t.ingresos_otros)]),
+        ),
+    ]
+    if t.ingresos_venta:
+        filas.append(FilaBalance("Venta de la planta", formatear_moneda(t.ingresos_venta)))
+    categorias = [(nombre.lower(), total) for nombre, total in balance.gastos_por_categoria]
+    filas += [
+        FilaBalance(
+            "Gastos",
+            formatear_moneda(t.gastos),
+            detalle(categorias[:4]) + (" · …" if len(categorias) > 4 else ""),
+        ),
+        FilaBalance(
+            "Resultado de operación",
+            formatear_moneda(t.resultado_operacion),
+            "Lo que deja operando: ingresos de operación menos gastos.",
+            negativo=t.resultado_operacion < 0,
+        ),
+    ]
+
+    valor_compra = balance.planta.datos.valor_compra
+    filas.append(
+        FilaBalance(
+            "Valor de compra",
+            formatear_moneda(valor_compra) if valor_compra is not None else "No registrado",
+            separador_antes=True,
+        )
+    )
+    recuperacion = balance.recuperacion
+    if not balance.periodo.es_todo:
+        filas.append(
+            FilaBalance(
+                "Recuperación de la inversión",
+                "—",
+                "Se calcula al consultar todo el historial: compara todo lo producido "
+                "contra el precio de compra.",
+            )
+        )
+    elif recuperacion is None:
+        filas.append(
+            FilaBalance(
+                "Recuperación de la inversión", "—", "Registre el valor de compra para calcularla."
+            )
+        )
+    else:
+        texto = (
+            f"Ya se pagó y además dejó {formatear_moneda(recuperacion)}."
+            if recuperacion >= 0
+            else f"Le faltan {formatear_moneda(-recuperacion)} para pagar lo que costó."
+        )
+        filas.append(
+            FilaBalance(
+                "Recuperación de la inversión",
+                formatear_moneda(recuperacion),
+                texto,
+                negativo=recuperacion < 0,
+            )
+        )
+    desgaste = balance.indicador.desgaste_pct
+    filas.append(
+        FilaBalance(
+            "Desgaste acumulado",
+            formatear_porcentaje(desgaste) or "—",
+            "Gastos de toda la vida frente al valor de compra.",
+        )
+    )
+
+    por_hora = balance.ingreso_por_hora
+    filas += [
+        FilaBalance(
+            "Horas de uso en alquileres",
+            formatear_entero(balance.horas_uso_alquiler, "h"),
+            "Según las lecturas del horómetro al salir y al regresar.",
+            separador_antes=True,
+        ),
+        FilaBalance(
+            "Ingreso por hora de uso",
+            formatear_moneda(por_hora) if por_hora is not None else "—",
+        ),
+    ]
+    if balance.saldo_por_cobrar:
+        filas.append(
+            FilaBalance(
+                "Saldo por cobrar",
+                formatear_moneda(balance.saldo_por_cobrar),
+                "De alquileres ya cerrados.",
+            )
+        )
+    return filas

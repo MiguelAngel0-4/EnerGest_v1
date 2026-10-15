@@ -1,5 +1,43 @@
 # Registro de cambios – EnerGest
 
+## [0.8.0] – 2026-10-14
+
+### Agregado
+
+- Pestaña "Balance" en la ficha: resultado de operación, recuperación de la
+  inversión, desgaste acumulado, horas de uso en alquileres, ingreso por hora y
+  saldo por cobrar, con selector de período.
+- Semáforo de reemplazo por planta (Rentable, Vigilar, Evaluar reemplazo, Sin
+  datos suficientes), siempre acompañado de sus razones. Sugiere, no decide.
+- Pantalla "Reportes financieros": tarjetas del período, gráfico mensual de
+  ingresos frente a gastos y tabla por planta ordenable, con su semáforo. Un
+  doble clic abre el balance de la planta.
+- Exportación a Excel con tres hojas (Resumen, Por mes y Movimientos) y valores
+  numéricos listos para sumar y filtrar.
+- Hoja de vida v2 con las secciones "8. Historial de alquileres" y
+  "9. Resumen financiero".
+
+### Cambiado
+
+- El menú lateral habilita "Reportes financieros" y es un poco más ancho.
+
+### Reglas de negocio
+
+- Desgaste: los gastos de toda la vida alcanzan el 60 % del valor de compra.
+- Pérdida reciente: en los últimos 12 meses los gastos superan los ingresos.
+- El semáforo se calcula con toda la vida de la planta, sin importar el período
+  consultado. Ambos umbrales se ajustan en `settings.py`.
+- La recuperación de la inversión solo se calcula al consultar todo el historial.
+
+### Dependencias
+
+- Nueva dependencia: `openpyxl` (exportación a Excel). Quien instale desde el
+  código fuente debe ejecutar `pip install -r requirements.txt`.
+
+### Base de datos
+
+- Sin cambios en el esquema (versión 4).
+
 ## [0.7.0] – 2026-10-12
 
 ### Agregado

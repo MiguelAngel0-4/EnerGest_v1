@@ -46,6 +46,7 @@ from src.infrastructure.repositories.sqlite_proveedor_repository import (
     SqliteCategoriaRepository,
     SqliteProveedorRepository,
 )
+from src.infrastructure.repositories.sqlite_reporte_repository import SqliteReporteRepository
 
 
 class SqliteUnidadDeTrabajo:
@@ -62,6 +63,7 @@ class SqliteUnidadDeTrabajo:
     clientes: SqliteClienteRepository
     alquileres: SqliteAlquilerRepository
     ingresos: SqliteIngresoRepository
+    reportes: SqliteReporteRepository
 
     def __init__(self, db: DatabaseManager) -> None:
         self._db = db
@@ -87,6 +89,7 @@ class SqliteUnidadDeTrabajo:
         self.clientes = SqliteClienteRepository(conn)
         self.alquileres = SqliteAlquilerRepository(conn)
         self.ingresos = SqliteIngresoRepository(conn)
+        self.reportes = SqliteReporteRepository(conn)
         return self
 
     def __exit__(

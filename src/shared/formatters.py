@@ -42,3 +42,17 @@ def formatear_entero(valor: int | None, sufijo: str = "") -> str:
     if valor is None:
         return SIN_VALOR
     return f"{valor:,} {sufijo}".replace(",", ".").strip()
+
+
+def formatear_porcentaje(valor: float | None) -> str | None:
+    """
+    Porcentaje entero para mostrar: 72.4 -> "72 %".
+
+    Un valor mayor que cero pero menor que 1 se muestra como "< 1 %": un "0 %"
+    sugeriría que no hay nada, cuando sí lo hay (por ejemplo, un desgaste pequeño).
+    """
+    if valor is None:
+        return None
+    if 0 < valor < 1:
+        return "< 1 %"
+    return f"{valor:.0f} %"
